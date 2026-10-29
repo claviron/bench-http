@@ -1,0 +1,12 @@
+listeners:
+  benchmark:
+    transport: tcp
+    tls: false
+    protocols: h1
+    listen: "${BENCH_LISTEN}"
+    requests:
+      max_body_size: off
+      body_read_timeout: off
+      head_timeout: null
+    h1:
+      header_read_timeout: null

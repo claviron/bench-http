@@ -1,0 +1,4 @@
+default:
+  root: .
+  access_log: "off"
+  transport: { non_ssl: serve, protocols: [h1] }

@@ -1,0 +1,28 @@
+[package]
+name = "bench-http"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+# HTTP hosts
+axum = "0.8"
+claviron = { version = "0.2.0-alpha.23", default-features = false, features = ["edge"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+
+# Shared response implementation
+bytes = "1"
+http = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Identical allocator for both hosts
+mimalloc = "0.1"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "thin"
+panic = "unwind"
