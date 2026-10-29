@@ -19,20 +19,26 @@ static REQUESTS: AtomicU64 = AtomicU64::new(0);
 struct Args {
     #[arg(long, default_value = "config")]
     config_dir: PathBuf,
-    #[arg(long, default_value = "bench-http")]
+    #[arg(long, default_value = "bypass-axum")]
     name: ServerName,
-    #[arg(long, default_value = "bhttp")]
+    #[arg(long, default_value = "bypass")]
     fleet: FleetName,
+    /// Worker processes; 0 runs standalone.
+    #[cfg(feature = "supervisor")]
+    #[arg(long, default_value_t = 0)]
+    workers: u8,
 }
 
 impl From<Args> for ServerOptions {
     fn from(args: Args) -> Self {
-        Self::new()
+        let options = Self::new()
             .config_dir(args.config_dir)
             .name(args.name)
             .fleet_name(args.fleet)
-            .workers(0)
-            .production()
+            .production();
+        #[cfg(feature = "supervisor")]
+        let options = options.workers(args.workers);
+        options
     }
 }
 

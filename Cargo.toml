@@ -6,11 +6,17 @@ publish = false
 
 [workspace]
 
+[features]
+supervisor = ["claviron/supervisor"]
+
 [dependencies]
 # HTTP hosts
 axum = "0.8"
 claviron = { version = "0.2.0-alpha.23", default-features = false, features = ["edge"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-graceful"] }
+httparse = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "io-util", "sync"] }
 
 # Command line
 clap = { version = "4", features = ["derive"] }
@@ -23,7 +29,7 @@ http-body-util = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# Identical allocator for both hosts
+# Identical allocator for all hosts
 mimalloc = "0.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 

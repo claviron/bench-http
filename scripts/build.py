@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build both native HTTP hosts with the same release profile and allocator."""
+"""Build all native HTTP hosts with the same release profile and allocator."""
 
 import argparse
 import json
@@ -14,9 +14,12 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--native", action="store_true", help="Optimize for this CPU")
+    parser.add_argument("--supervisor", action="store_true",
+                        help="Enable supervised worker processes for Bypass")
     parser.add_argument("--claviron-source", type=Path,
                         help="Use a Claviron source checkout instead of the registry")
     args = parser.parse_args()
+    features = ["--features", "supervisor"] if args.supervisor else []
     env = os.environ.copy()
     if args.native:
         env["RUSTFLAGS"] = (env.get("RUSTFLAGS", "") + " -C target-cpu=native").strip()
@@ -31,7 +34,7 @@ def main():
         )
         cargo += ["--config", str(config)]
     metadata = json.loads(subprocess.check_output(
-        [*cargo, "metadata", "--format-version", "1", "--all-features"],
+        [*cargo, "metadata", "--format-version", "1", *features],
         cwd=ROOT, env=env, text=True,
     ))
     resolved = next(p for p in metadata["packages"] if p["name"] == "claviron")
@@ -46,7 +49,7 @@ def main():
     else:
         print("Claviron registry version: " + resolved["version"], flush=True)
     subprocess.run(
-        [*cargo, "build", "--release", "--workspace", "--all-features", "--all-targets"],
+        [*cargo, "build", "--release", "--workspace", *features, "--all-targets"],
         cwd=ROOT, env=env, check=True,
     )
     print("Binary directory: " + str(Path(metadata["target_directory"]) / "release"))

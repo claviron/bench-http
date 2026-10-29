@@ -1,17 +1,31 @@
 # bench-http
 
-Compare Axum's native `Json` handler with a Claviron Bypass handler over plain
-HTTP/1.1. Both servers run in a single process, use Tokio and mimalloc, and
-serialize the same fields as the PHP benchmark on every `GET /json` request:
+Compare a minimal Tokio TCP server, direct Hyper HTTP/1, Axum's native `Json`
+handler and a Claviron Bypass handler over plain HTTP/1.1. All servers default
+to a single process, use Tokio and mimalloc, and serialize the same fields as
+the PHP benchmark on every `GET /json` request:
 
 ```json
 {"runtime":"rust","engine":"Axum","method":"GET","path":"/json","body":"","requests":1}
 ```
 
-The Bypass response uses `Claviron Bypass` as its engine. Both read the request
-method, URL path and UTF-8 body, and increment a process-wide request counter.
+Tokio uses `Tokio` as its engine, Hyper uses `Hyper`, and Bypass uses
+`Claviron Bypass`. All read the request method, URL path and UTF-8 body, and
+increment a process-wide request counter.
 Axum uses its native `Request` extractor and `Json` response; Bypass uses
 Claviron's request and response body types.
+
+Hyper calls the handler directly through `service_fn`, without a router or
+middleware. It uses a concrete `Full<Bytes>` response body, vectored TCP writes
+and `TCP_NODELAY`. Empty request bodies skip collection. Tasks and shutdown
+watchers are created per connection; requests run inside the connection task.
+
+Tokio uses `TcpListener`/`TcpStream` and `httparse`, without Hyper or a router.
+It enables `TCP_NODELAY`, reuses connection buffers for input, JSON and response
+headers, and writes headers and body with vectored IO. It supports fragmented
+and pipelined HTTP/1.1 requests, UTF-8 bodies framed with `Content-Length`, and
+`Connection: close`. Transfer encodings and `Expect` are rejected with HTTP 400;
+it does not add a `Date` header. This is a limited benchmark baseline.
 
 ## Build
 
@@ -21,7 +35,13 @@ Requires Rust, Python 3 and `wrk`.
 python3 scripts/build.py --native
 ```
 
-Both binaries use the same release profile: optimization level 3, one codegen
+To enable the optional `supervisor` Cargo feature for Bypass:
+
+```sh
+python3 scripts/build.py --native --supervisor
+```
+
+All binaries use the same release profile: optimization level 3, one codegen
 unit, fat LTO, no debug information and unwinding on panic. `--native` optimizes
 for the build machine's CPU; omit it for a portable CPU target.
 
@@ -29,7 +49,7 @@ The default build uses the published Claviron dependency. To use a source
 checkout, including changes that have not been released:
 
 ```sh
-python3 scripts/build.py --native --claviron-source ../../claviron
+python3 scripts/build.py --native --claviron-source /path/to/claviron
 ```
 
 The script verifies the selected source and prints its commit, or the resolved
@@ -38,6 +58,15 @@ registry version. It prints the binary directory and respects `CARGO_TARGET_DIR`
 ## Run
 
 Run from the repository root. Start one server at a time on the same address.
+
+Before starting a server or `wrk`, set the soft open-file limit in each shell:
+
+```sh
+ulimit -Sn 65536
+```
+
+A low descriptor limit can cause `Too many open files` or connection errors
+during high-connection runs. The shell's hard limit must permit this value.
 
 ```sh
 export BENCH_ADDRESS=127.0.0.1:8080
@@ -51,8 +80,31 @@ Stop Axum before starting Claviron:
 ./target/release/bypass --config-dir config --name bench-http --fleet bhttp
 ```
 
+The default build runs Bypass standalone and has no `--workers` option. When
+built with `--supervisor`, `--workers 0` remains standalone; a positive count
+starts supervised worker processes:
+
+```sh
+./target/release/bypass --config-dir config --name bench-http --fleet bhttp --workers 4
+```
+
+The request counter is local to each worker. `config/supervisor.yaml` keeps the
+supervisor's declared defaults.
+
+Stop Claviron before starting Hyper on the same address:
+
+```sh
+./target/release/hyper
+```
+
+Stop Hyper before starting Tokio on the same address:
+
+```sh
+./target/release/tokio
+```
+
 Axum reads `BENCH_ADDRESS` directly and enables `TCP_NODELAY`. Claviron reads
-the same address through `config/http.yaml`, runs in standalone production mode
+the same address through `config/http.yaml`, runs in production mode
 and disables access logging through `config/vhost.yaml`.
 
 ## Measure
