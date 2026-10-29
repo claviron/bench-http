@@ -12,17 +12,24 @@ axum = "0.8"
 claviron = { version = "0.2.0-alpha.23", default-features = false, features = ["edge"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
 
+# Command line
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1.44"
+
 # Shared response implementation
 bytes = "1"
 http = "1"
+http-body-util = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Identical allocator for both hosts
 mimalloc = "0.1"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [profile.release]
 opt-level = 3
 codegen-units = 1
-lto = "thin"
+lto = "fat"
+debug = 0
 panic = "unwind"

@@ -3,7 +3,7 @@ listeners:
     transport: tcp
     tls: false
     protocols: h1
-    listen: "${BENCH_LISTEN}"
+    listen: ${BENCH_ADDRESS}
     requests:
       max_body_size: off
       body_read_timeout: off
