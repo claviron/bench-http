@@ -205,6 +205,16 @@ async fn serve(mut stream: TcpStream, mut stop: watch::Receiver<()>) -> io::Resu
 fn completed(result: Result<io::Result<()>, tokio::task::JoinError>) {
     match result {
         Ok(Ok(())) => {}
+        Ok(Err(error))
+            if matches!(
+                error.kind(),
+                io::ErrorKind::ConnectionReset
+                    | io::ErrorKind::ConnectionAborted
+                    | io::ErrorKind::BrokenPipe
+            ) =>
+        {
+            tracing::debug!(%error, "HTTP peer disconnected");
+        }
         Ok(Err(error)) => tracing::warn!(%error, "HTTP connection failed"),
         Err(error) => tracing::error!(%error, "HTTP connection task failed"),
     }
