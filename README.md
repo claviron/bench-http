@@ -1,15 +1,15 @@
 # bench-http
 
-Compare a minimal Tokio TCP server, direct Hyper HTTP/1, Axum's native `Json`
+Compare direct Mio and Tokio TCP servers, Hyper HTTP/1, Axum's native `Json`
 handler and a Claviron Bypass handler over plain HTTP/1.1. All servers default
-to a single process, use Tokio and mimalloc, and serialize the same fields as
+to a single process, use mimalloc, and serialize the same fields as
 the PHP benchmark on every `GET /json` request:
 
 ```json
 {"runtime":"rust","engine":"Axum","method":"GET","path":"/json","body":"","requests":1}
 ```
 
-Tokio uses `Tokio` as its engine, Hyper uses `Hyper`, and Bypass uses
+Mio uses `Mio` as its engine, Tokio uses `Tokio`, Hyper uses `Hyper`, and Bypass uses
 `Claviron Bypass`. All read the request method, URL path and UTF-8 body, and
 increment a process-wide request counter.
 Axum uses its native `Request` extractor and `Json` response; Bypass uses
@@ -26,6 +26,19 @@ headers, and writes headers and body with vectored IO. It supports fragmented
 and pipelined HTTP/1.1 requests, UTF-8 bodies framed with `Content-Length`, and
 `Connection: close`. Transfer encodings and `Expect` are rejected with HTTP 400;
 it does not add a `Date` header. This is a limited benchmark baseline.
+
+Mio shares Tokio's HTTP parser and JSON schema, but handles socket readiness
+directly without a Tokio runtime or connection tasks. Each server thread owns
+its own `Poll`, `SO_REUSEPORT` listener and connection state. It reuses input
+and output buffers, supports partial reads/writes and pipelining, and changes
+the socket's registered interest only when read/write backpressure requires it.
+The event batch capacity is not a connection limit. Like the Tokio baseline,
+it supports HTTP/1.1 with `Content-Length`, rather than general HTTP hosting.
+
+Mio stops accepting on Ctrl+C, SIGTERM or SIGHUP. `Waker` wakes each Poll loop;
+idle connections close and admitted requests and pending writes drain without
+a shutdown timeout. A client that does not complete an admitted request can
+therefore keep shutdown waiting.
 
 ## Build
 
@@ -102,6 +115,17 @@ Stop Hyper before starting Tokio on the same address:
 ```sh
 ./target/release/tokio
 ```
+
+Stop Tokio before starting Mio on the same address (Unix):
+
+```sh
+./target/release/mio --threads 16
+```
+
+`--threads` defaults to the available CPU count. These are server threads
+inside one process, independent of `wrk -t`. `--backlog` declares the requested
+listen backlog per socket (default 1024); the OS may cap it. Mio reads
+`BENCH_ADDRESS` and enables `TCP_NODELAY`, like the other native TCP hosts.
 
 Axum reads `BENCH_ADDRESS` directly and enables `TCP_NODELAY`. Claviron reads
 the same address through `config/http.yaml`, runs in production mode

@@ -16,10 +16,13 @@ claviron = { version = "0.2.0-alpha.23", default-features = false, features = ["
 hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["tokio", "server-graceful"] }
 httparse = "1"
+mio = { version = "1", features = ["os-poll", "net"] }
+socket2 = { version = "0.6", features = ["all"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "io-util", "sync"] }
 
 # Command line
 clap = { version = "4", features = ["derive"] }
+ctrlc = { version = "3", features = ["termination"] }
 tracing = "0.1.44"
 
 # Shared response implementation
