@@ -154,23 +154,22 @@ expected response and confirming that all reported error counters are zero.
 
 ## Benchmark
 
-Latest recorded measurement for each target, October 2026. The rows span
-different CPUs, loads and profiling modes; compare targets within a series.
+Linux x86_64, 2 × Xeon E5-2650 v2 (16 physical / 32 logical CPUs).
+All five used **`wrk -t8 -c1024 -d30m`**, one serving process, release/native
+builds, the same wrk executable and allocator policy, without profiling.
 
-| Target | Series | Requests/s | p99, ms | Server CPU, µs/request | Errors |
-|---|---|---:|---:|---:|---:|
-| Mio TCP | A | 645,592.68 | 3.337 | 11.904 | 0 |
-| Tokio TCP | A | 614,926.97 | 2.962 | 12.919 | 0 |
-| Hyper | D, saved reference | 759,529.06 | 12.534 | 22.612 | 0 |
-| Axum | B | 342,874.24 | 0.252 | 26.790 | 0 |
-| Claviron Bypass | D, updated | 547,417 | 17.061 | 39.058 | 0 |
+| Target | Requests/s | p99, ms | Server CPU, µs/request | Errors |
+|---|---:|---:|---:|---:|
+| Mio TCP | 645,592.68 | 3.337 | 11.904 | 0 |
+| Tokio TCP | 614,926.97 | 2.962 | 12.919 | 0 |
+| Hyper | 582,626.08 | 3.506 | 19.210 | 0 |
+| Axum | 545,869.55 | 3.997 | 26.497 | 0 |
+| Claviron Bypass | 494,709.70 | 5.682 | 33.575 | 0 |
 
-- **A:** Linux, 32 logical CPUs, `wrk -t8 -c1024 -d30m`, without profiling.
-- **B:** Linux, 40 logical CPUs, `wrk -t4 -c64 -d5m`, without profiling.
-- **D:** The same 40-CPU system, `wrk -t16 -c2048 -d5m`, with target-only
-  perf sampling/statistics. Hyper is a saved reference; Bypass uses Claviron
-  `6f83a34`.
+Mio and Tokio are the retained completed runs; Hyper, Axum and Bypass were
+then measured sequentially on the same system. Bypass uses Claviron
+`7de9d4b`. Server implementations and listener defaults differ; each row is
+one observation, rather than a repeated capacity estimate.
 
-A matched five-target series has not been recorded.
-[BENCHMARK.md](BENCHMARK.md) contains the measurement sets, earlier results,
-error counts, build revisions and the native Deno reference.
+[BENCHMARK.md](BENCHMARK.md) contains full conditions, source/binary revisions,
+CPU accounting, error counts, the native Deno reference and historical series.
