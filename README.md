@@ -20,6 +20,12 @@ middleware. It uses a concrete `Full<Bytes>` response body, vectored TCP writes
 and `TCP_NODELAY`. Empty request bodies skip collection. Tasks and shutdown
 watchers are created per connection; requests run inside the connection task.
 
+`tower` and `hyper-control` add an equivalent policy workload to that Hyper
+transport. Tower composes eight concrete layers with `ServiceBuilder`;
+Hyper control calls the same checks directly. Both use the same JSON handler
+and return `Hyper` as the engine so their response payloads remain equivalent.
+The existing `hyper` binary remains the bare reference.
+
 Tokio uses `TcpListener`/`TcpStream` and `httparse`, without Hyper or a router.
 It enables `TCP_NODELAY`, reuses connection buffers for input, JSON and response
 headers, and writes headers and body with vectored IO. It supports fragmented
@@ -110,6 +116,15 @@ Stop Claviron before starting Hyper on the same address:
 ./target/release/hyper
 ```
 
+For the matched policy comparison, run `hyper-control` and `tower` one at a
+time on that same address:
+
+```sh
+./target/release/hyper-control
+# Stop Hyper control before starting Tower.
+./target/release/tower
+```
+
 Stop Hyper before starting Tokio on the same address:
 
 ```sh
@@ -130,6 +145,58 @@ listen backlog per socket (default 1024); the OS may cap it. Mio reads
 Axum reads `BENCH_ADDRESS` directly and enables `TCP_NODELAY`. Claviron reads
 the same address through `config/http.yaml`, runs in production mode
 and disables access logging through `config/vhost.yaml`.
+
+## Tower policy comparison
+
+The two policy hosts share their listener, socket settings, allocator, connection
+tasks, graceful shutdown, checks and JSON handler. The Tower stack is assembled
+before listening and cloned for each connection. Its native `TowerToHyperService`
+bridge also clones the concrete service per request and observes Tower readiness.
+The direct control does not use that bridge: their difference includes both
+Tower composition and adaptation to Hyper.
+
+| Order | Layer | Shared work |
+| --- | --- | --- |
+| 1 | Authority | Require one valid Host authority; compare an absolute URI authority when present. |
+| 2 | Deny path | Reject `/denied` and its descendants with a prepared prefix. |
+| 3 | Proxy | Resolve one `X-Forwarded-For` IP from a trusted physical peer; publish Claviron's `RealIpExt`. |
+| 4 | Context | Publish typed host/peer metadata from the validated authority and connection facts. |
+| 5 | ACL | Read `RealIpExt` and enforce the fixture's client allowlist. |
+| 6 | Content length | Validate a single decimal Content-Length when supplied. Hyper still owns wire framing. |
+| 7 | Received at | Read SystemTime and publish Claviron's `ReceivedAt` extension. |
+| 8 | Origin | Validate the supplied Origin and add Allow-Origin/Vary headers when the application replies. |
+
+These are fixed benchmark fixtures, not production-grade replacements for
+Claviron's authority, proxy, ACL or CORS implementations. Only loopback physical
+peers are trusted proxies. The client allowlist contains loopback, `192.0.2.0/24`
+and `2001:db8::/32`; the permitted origin is `https://client.example`.
+Forwarding chains and repeated forwarding fields are rejected for trusted peers.
+Untrusted peers' forwarding headers are ignored. Header checks leave the body
+unpolled; the final shared handler reads it using the bare Hyper handler's logic.
+
+Use these same headers for both policy hosts to exercise forwarding and the
+Origin response path:
+
+```sh
+curl -i -H 'X-Forwarded-For: 192.0.2.10' \
+  -H 'Origin: https://client.example' http://127.0.0.1:8080/json
+
+wrk -t16 -c1024 -d5m --latency -s scripts/summary.lua \
+  -H 'X-Forwarded-For: 192.0.2.10' -H 'Origin: https://client.example' \
+  http://127.0.0.1:8080/json
+```
+
+Both must return HTTP 200, matching JSON fields and the same CORS response
+headers. Compare requests/sec, p99, errors and server CPU/request under identical
+build/load settings. A different worker count, request headers or load setting
+is a separate experiment.
+
+No `BoxService`, `BoxCloneService` or boxed response future is used by the eight
+layers. Typed request extensions, authority parsing and JSON serialization still
+allocate; both hosts perform that same work. This comparison does not establish
+a clone-free Hyper adapter or isolate type-erasure overhead. The bare Hyper
+reference omits the policy work and returns fewer response headers, so its gap
+must not be described as Tower overhead alone.
 
 ## Measure
 
