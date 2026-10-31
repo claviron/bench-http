@@ -64,8 +64,9 @@ All binaries use the same release profile: optimization level 3, one codegen
 unit, fat LTO, no debug information and unwinding on panic. `--native` optimizes
 for the build machine's CPU; omit it for a portable CPU target.
 
-The default build uses the published Claviron dependency. To use a source
-checkout, including changes that have not been released:
+The default build uses the published Claviron dependency. Bypass's configured
+backlog requires Claviron's `tcp.backlog` support. Until that change is available
+in the selected release, build with a source checkout containing it:
 
 ```sh
 python3 scripts/build.py --native --claviron-source /path/to/claviron
@@ -149,10 +150,11 @@ and disables access logging through `config/vhost.yaml`.
 
 ### Listen backlog
 
-`BENCH_BACKLOG` sets the requested TCP listen backlog for `axum`, `tokio`,
-`mio`, `hyper`, `hyper-control` and `tower`. It is read once at startup and
-defaults to **2048** when unset. Change it when launching a process; rebuilding
-is unnecessary:
+`BENCH_BACKLOG` sets the requested TCP listen backlog for every host. Bypass
+reads it through `config/http.yaml`'s `tcp.backlog`; export it before starting
+Bypass, as shown above. The six native hosts default to **2048** when it is
+unset. Change it when launching a process; rebuilding is unnecessary once the
+binary supports the setting:
 
 ```sh
 BENCH_ADDRESS=127.0.0.1:8080 BENCH_BACKLOG=4096 ./target/release/hyper
@@ -162,8 +164,9 @@ Values must be integers from 1 to 2147483647. Empty, zero, negative and invalid
 values fail startup. Mio's explicit `--backlog` takes precedence over the
 environment setting. Its backlog applies to each `SO_REUSEPORT` listener.
 
-**Bypass does not use `BENCH_BACKLOG`: its Claviron-owned listener currently
-requests a fixed backlog of 1024.** No Claviron library change is included here.
+Bypass requires a Claviron build with configurable TCP backlog; see the source
+build instructions above. Its listener consumes this setting at bind time, so
+restart the process after changing it.
 
 The backlog bounds pending connections waiting for acceptance, not active
 keep-alive connections or in-flight HTTP requests. The OS can cap the requested

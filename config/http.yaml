@@ -4,6 +4,8 @@ listeners:
     tls: false
     protocols: h1
     listen: ${BENCH_ADDRESS}
+    tcp:
+      backlog: ${BENCH_BACKLOG}
     requests:
       max_body_size: off
       body_read_timeout: off
