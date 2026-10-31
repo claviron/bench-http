@@ -1,19 +1,14 @@
 use std::io::{self, IoSlice, Write as _};
-use std::sync::atomic::{AtomicU64, Ordering};
 
-use bench_http::http1::{Answer, parse_head};
+use bench_http::support::{http1::parse_head, payload::{Answer, Endpoint, PLAIN}, runtime};
 use bytes::{Buf, BytesMut};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::signal;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
-use tracing_subscriber::EnvFilter;
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
-static REQUESTS: AtomicU64 = AtomicU64::new(0);
 
 async fn write_response(stream: &mut TcpStream, header: &[u8], body: &[u8]) -> io::Result<()> {
     let mut buffers = [IoSlice::new(header), IoSlice::new(body)];
@@ -43,39 +38,35 @@ async fn serve(mut stream: TcpStream, mut stop: watch::Receiver<()>) -> io::Resu
         };
         let in_flight = head.is_some();
         if let Some(head) = head.filter(|head| input.len() >= head.end) {
-            if head.method != "GET" || head.path != "/json" {
+            let Some(endpoint) = Endpoint::select(head.method, head.path) else {
                 return stream
                     .write_all(
                         b"HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
                     )
                     .await;
-            }
-            let body = match std::str::from_utf8(&input[head.header_len..head.end]) {
-                Ok(body) => body,
-                Err(_) => {
-                    return stream
-                        .write_all(b"HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
-                        .await;
-                }
             };
             json.clear();
-            serde_json::to_writer(
-                &mut json,
-                &Answer {
-                    runtime: "rust",
-                    engine: "Tokio",
-                    method: head.method,
-                    path: head.path,
-                    body,
-                    requests: REQUESTS.fetch_add(1, Ordering::Relaxed) + 1,
-                },
-            )
-            .expect("the response is serializable");
+            match endpoint {
+                Endpoint::Plain => json.extend_from_slice(PLAIN),
+                Endpoint::Json => {
+                    let body = match std::str::from_utf8(&input[head.header_len..head.end]) {
+                        Ok(body) => body,
+                        Err(_) => {
+                            return stream
+                                .write_all(b"HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+                                .await;
+                }
+            };
+            serde_json::to_writer(&mut json, &Answer::new(head.method, head.path, body))
+                .expect("the response is serializable");
+                }
+            }
             let close = head.close || stop.has_changed().unwrap_or(true);
             header.clear();
             write!(
                 header,
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n{}\r\n",
+                "HTTP/1.1 200 OK\r\ncontent-type: {}\r\ncontent-length: {}\r\n{}\r\n",
+                endpoint.content_type(),
                 json.len(),
                 if close { "connection: close\r\n" } else { "" },
             )?;
@@ -131,17 +122,12 @@ fn completed(result: Result<io::Result<()>, tokio::task::JoinError>) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .without_time()
-        .init();
+    runtime::logging();
 
-    let listener = bench_http::listener::bind(std::env::var("BENCH_ADDRESS")?).await?;
+    let listener = bench_http::support::listener::bind(std::env::var("BENCH_ADDRESS")?).await?;
     let (stop, receiver) = watch::channel(());
     let mut connections = JoinSet::new();
-    let shutdown = shutdown_signal();
+    let shutdown = runtime::shutdown_signal();
     tokio::pin!(shutdown);
     tracing::info!("Listening on address {}", listener.local_addr()?);
 
@@ -164,25 +150,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     tracing::info!("Tokio shutdown gracefully");
     Ok(())
-}
-
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-    };
-    #[cfg(unix)]
-    let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
-    };
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-    tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
-    }
 }

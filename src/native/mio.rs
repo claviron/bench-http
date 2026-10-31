@@ -4,31 +4,29 @@ use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
-use bench_http::http1::{Answer, parse_head};
+use bench_http::support::{http1::parse_head, payload::{Answer, Endpoint, PLAIN}, runtime};
 use clap::Parser;
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Poll, Registry, Token, Waker};
 use socket2::{Domain, Protocol, Socket, Type};
-use tracing_subscriber::EnvFilter;
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-static REQUESTS: AtomicU64 = AtomicU64::new(0);
 const LISTENER: Token = Token(0);
 const STOP: Token = Token(1);
 
 #[derive(Parser)]
-#[command(about = "Serve HTTP/1.1 JSON directly from one Mio Poll loop per thread")]
+#[command(about = "Serve HTTP/1.1 plain/JSON directly from one Mio Poll loop per thread")]
 struct Options {
     /// Number of independent Poll loops in this process.
     #[arg(long, default_value_t = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN))]
     threads: NonZeroUsize,
     /// Override BENCH_BACKLOG for each socket; the OS may cap it.
-    #[arg(long, value_parser = bench_http::listener::parse_backlog)]
+    #[arg(long, value_parser = bench_http::support::listener::parse_backlog)]
     backlog: Option<i32>,
 }
 
@@ -135,36 +133,32 @@ impl Connection {
             };
             if let Some(head) = head {
                 if self.used >= head.end {
-                    if head.method != "GET" || head.path != "/json" {
+                    let Some(endpoint) = Endpoint::select(head.method, head.path) else {
                         self.reject(b"HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
                         continue;
-                    }
-                    let body = match std::str::from_utf8(&self.input[head.header_len..head.end]) {
-                        Ok(body) => body,
-                        Err(_) => {
-                            self.reject(b"HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
-                            continue;
-                        }
                     };
                     self.json.clear();
-                    serde_json::to_writer(
-                        &mut self.json,
-                        &Answer {
-                            runtime: "rust",
-                            engine: "Mio",
-                            method: head.method,
-                            path: head.path,
-                            body,
-                            requests: REQUESTS.fetch_add(1, Ordering::Relaxed) + 1,
-                        },
-                    )
-                    .expect("the response is serializable");
+                    match endpoint {
+                        Endpoint::Plain => self.json.extend_from_slice(PLAIN),
+                        Endpoint::Json => {
+                            let body = match std::str::from_utf8(&self.input[head.header_len..head.end]) {
+                                Ok(body) => body,
+                                Err(_) => {
+                                    self.reject(b"HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+                                    continue;
+                        }
+                    };
+                    serde_json::to_writer(&mut self.json, &Answer::new(head.method, head.path, body))
+                        .expect("the response is serializable");
+                        }
+                    }
                     self.close = head.close || stop.load(Ordering::Relaxed);
                     self.consumed = head.end;
                     self.header.clear();
                     write!(
                         self.header,
-                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n{}\r\n",
+                        "HTTP/1.1 200 OK\r\ncontent-type: {}\r\ncontent-length: {}\r\n{}\r\n",
+                        endpoint.content_type(),
                         self.json.len(),
                         if self.close {
                             "connection: close\r\n"
@@ -342,13 +336,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options = Options::parse();
     let backlog = options
         .backlog
-        .map_or_else(bench_http::listener::backlog_from_env, Ok)?;
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .without_time()
-        .init();
+        .map_or_else(bench_http::support::listener::backlog_from_env, Ok)?;
+    runtime::logging();
 
     let mut address: SocketAddr = std::env::var("BENCH_ADDRESS")?.parse()?;
     let mut workers = Vec::with_capacity(options.threads.get());

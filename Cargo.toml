@@ -3,25 +3,25 @@ name = "bench-http"
 version = "0.1.0"
 edition = "2024"
 publish = false
+autobins = false
 
 [workspace]
 
 [features]
-supervisor = ["claviron/supervisor"]
+default = []
+claviron = ["dep:claviron"]
+supervisor = ["claviron", "claviron/supervisor"]
 
 [dependencies]
 # HTTP hosts
 axum = "0.8"
-claviron = { version = "0.2.0-alpha.23", default-features = false, features = ["edge"] }
+claviron = { version = "0.2.0-alpha.23", default-features = false, features = ["edge", "axum"], optional = true }
 hyper = { version = "1", features = ["http1", "server"] }
-hyper-util = { version = "0.1", features = ["tokio", "server-graceful", "service"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-graceful"] }
 httparse = "1"
 mio = { version = "1", features = ["os-poll", "net"] }
 socket2 = { version = "0.6", features = ["all"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "io-util", "sync"] }
-tower = { version = "0.5", default-features = false, features = ["util"] }
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
-pin-project-lite = "0.2"
 
 # Command line
 clap = { version = "4", features = ["derive"] }
@@ -38,6 +38,37 @@ serde_json = "1"
 # Identical allocator for all hosts
 mimalloc = "0.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[[bin]]
+name = "tokio"
+path = "src/native/tokio.rs"
+
+[[bin]]
+name = "mio"
+path = "src/native/mio.rs"
+
+[[bin]]
+name = "hyper"
+path = "src/native/hyper.rs"
+
+[[bin]]
+name = "axum"
+path = "src/native/axum.rs"
+
+[[bin]]
+name = "claviron-other"
+path = "src/claviron/other.rs"
+required-features = ["claviron"]
+
+[[bin]]
+name = "claviron-axum"
+path = "src/claviron/axum.rs"
+required-features = ["claviron"]
+
+[[bin]]
+name = "claviron-routable"
+path = "src/claviron/routable.rs"
+required-features = ["claviron"]
 
 [profile.release]
 opt-level = 3

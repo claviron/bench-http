@@ -1,15 +1,5 @@
 //! HTTP/1.1 framing shared by the direct TCP benchmark servers.
 
-#[derive(serde::Serialize)]
-pub struct Answer<'a> {
-    pub runtime: &'static str,
-    pub engine: &'static str,
-    pub method: &'a str,
-    pub path: &'a str,
-    pub body: &'a str,
-    pub requests: u64,
-}
-
 pub struct Head<'a> {
     pub method: &'a str,
     pub path: &'a str,
