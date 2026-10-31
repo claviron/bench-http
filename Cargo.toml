@@ -15,7 +15,7 @@ supervisor = ["claviron", "claviron/supervisor"]
 [dependencies]
 # HTTP hosts
 axum = "0.8"
-claviron = { version = "0.2.0-alpha.23", default-features = false, features = ["edge", "axum"], optional = true }
+claviron = { version = "0.2.0-alpha.24", path = "../../claviron", default-features = false, features = ["edge", "axum"], optional = true }
 hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["tokio", "server-graceful"] }
 httparse = "1"

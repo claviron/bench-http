@@ -45,24 +45,24 @@ boundary references. Server headers can also differ between native and Claviron.
 
 ## Build
 
-Native targets do not select the optional Claviron dependency:
+Native targets do not compile the optional Claviron dependency:
 
 ```sh
 python3 scripts/build.py --native --target native
 ```
 
-The Claviron entries use the current HostPipeline/Other API. Until a published
-release contains it, select a matching source checkout explicitly:
+The manifest selects a local Claviron checkout with version requirement
+`0.2.0-alpha.24`. This version is not published yet. Cargo reads the checkout
+from the dependency's `path` and checks its declared version.
 
 ```sh
-python3 scripts/build.py --native --claviron-source /path/to/claviron
+python3 scripts/build.py --native
 ```
 
 The default target is `all`. `--target claviron` builds only the three Claviron
 entries; a binary name selects one target. `--supervisor` exposes `--workers` on
-Claviron entries. Source overrides are generated under ignored `.cache/`; the
-manifest keeps a registry dependency. The script verifies the selected checkout
-and prints its Git revision, or the resolved registry version.
+Claviron entries. The script reports the source location, version and Git revision
+selected by Cargo; it does not rewrite the manifest or generate source overrides.
 
 Every target uses the same release profile: opt-level 3, one codegen unit, fat
 LTO, no debug information and panic unwinding. `--native` selects the build CPU;

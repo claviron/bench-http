@@ -20,8 +20,6 @@ def main():
                         default="all", help="Select a group or one binary (default: all)")
     parser.add_argument("--supervisor", action="store_true",
                         help="Expose --workers on Claviron binaries")
-    parser.add_argument("--claviron-source", type=Path,
-                        help="Use a Claviron source checkout instead of the registry")
     args = parser.parse_args()
     targets = {"all": NATIVE + CLAVIRON, "native": NATIVE, "claviron": CLAVIRON}.get(args.target, (args.target,))
     with_claviron = any(target in CLAVIRON for target in targets)
@@ -32,28 +30,19 @@ def main():
     if args.native:
         env["RUSTFLAGS"] = (env.get("RUSTFLAGS", "") + " -C target-cpu=native").strip()
     cargo = ["cargo"]
-    if args.claviron_source:
-        source = args.claviron_source.resolve()
-        cache = ROOT / ".cache"
-        cache.mkdir(exist_ok=True)
-        config = cache / "source.toml"
-        config.write_text(
-            "[patch.crates-io]\nclaviron = { path = " + json.dumps(str(source)) + " }\n"
-        )
-        cargo += ["--config", str(config)]
     metadata = json.loads(subprocess.check_output(
         [*cargo, "metadata", "--format-version", "1", *features],
         cwd=ROOT, env=env, text=True,
     ))
     if with_claviron:
         resolved = next(p for p in metadata["packages"] if p["name"] == "claviron")
-        if args.claviron_source:
-            expected = source / "Cargo.toml"
-            if resolved["source"] is not None or Path(resolved["manifest_path"]) != expected:
-                raise SystemExit("Claviron did not resolve to the selected source checkout")
+        if resolved["source"] is None:
+            source = Path(resolved["manifest_path"]).parent
             revision = subprocess.check_output(
                 ["git", "-C", str(source), "rev-parse", "HEAD"], text=True,
             ).strip()
+            print("Claviron source: " + str(source), flush=True)
+            print("Claviron source version: " + resolved["version"], flush=True)
             print("Claviron source revision: " + revision, flush=True)
         else:
             print("Claviron registry version: " + resolved["version"], flush=True)
