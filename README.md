@@ -248,6 +248,38 @@ latency and error counters; duration and latency are in microseconds. It does
 not validate response bodies. Interpret throughput only after checking the
 expected response and confirming that all reported error counters are zero.
 
+## CPU overhead acceptance decision
+
+Claviron's native request paths use the following project performance budgets:
+
+| Claviron path | Matched reference | Maximum extra server CPU/request |
+| --- | --- | ---: |
+| Minimal raw/router path through a typed caller to the handler | Bare `hyper`, serving the same handler workload | 10% |
+| Path with policies enabled | `hyper-control`, performing the equivalent enabled checks and response work | 10% |
+
+For each path, acceptance requires:
+
+```text
+Claviron CPU/request <= reference CPU/request * 1.10
+overhead (%) = 100 * (Claviron CPU/request / reference CPU/request - 1)
+```
+
+Measure server CPU/request from the serving processes' user+system CPU-time
+delta across all their threads, divided by completed client requests. Exclude
+the load generator and functional preflight. Compare matched runs on the same
+OS and hardware with the same build profile, runtime settings, listen backlog,
+wrk parameters, request headers and equivalent handler/response work.
+
+These are relative project budgets, not fixed requests/sec targets or universal
+server standards. Use runs with valid expected responses and zero reported
+HTTP/socket/timeout errors. Report throughput and p99 alongside CPU/request;
+the CPU budget does not establish a separate numeric p99 limit.
+
+The decision guides subsequent Claviron path changes and preserves the use of
+typed callers; it does not require a typed service for every operation. Existing
+benchmark results provide references, rather than proof that every Claviron path
+already meets these budgets.
+
 ## Benchmark
 
 Linux x86_64, 2 × Xeon E5-2650 v2 (16 physical / 32 logical CPUs).
