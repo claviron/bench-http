@@ -27,9 +27,9 @@ struct Options {
     /// Number of independent Poll loops in this process.
     #[arg(long, default_value_t = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN))]
     threads: NonZeroUsize,
-    /// Requested listen backlog for each socket; the OS may cap it.
-    #[arg(long, default_value_t = 1024, value_parser = clap::value_parser!(i32).range(1..))]
-    backlog: i32,
+    /// Override BENCH_BACKLOG for each socket; the OS may cap it.
+    #[arg(long, value_parser = bench_http::listener::parse_backlog)]
+    backlog: Option<i32>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -340,6 +340,9 @@ fn stop_workers(stop: &AtomicBool, wakers: &[Waker]) {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options = Options::parse();
+    let backlog = options
+        .backlog
+        .map_or_else(bench_http::listener::backlog_from_env, Ok)?;
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -351,7 +354,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut workers = Vec::with_capacity(options.threads.get());
     let mut wakers = Vec::with_capacity(options.threads.get());
     for _ in 0..options.threads.get() {
-        let listener = bind(address, options.backlog)?;
+        let listener = bind(address, backlog)?;
         address = listener.local_addr()?;
         let (worker, waker) = Worker::new(listener)?;
         workers.push(worker);
@@ -391,7 +394,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     if failure.is_none() {
-        tracing::info!(%address, threads = options.threads.get(), backlog = options.backlog, "Listening");
+        tracing::info!(%address, threads = options.threads.get(), backlog, "Listening");
     }
     for thread in threads {
         let result = thread

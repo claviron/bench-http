@@ -9,7 +9,6 @@ use hyper::server::conn::http1;
 use hyper::service::Service;
 use hyper_util::rt::TokioIo;
 use hyper_util::server::graceful::GracefulShutdown;
-use tokio::net::TcpListener;
 use tokio::signal;
 use tracing_subscriber::EnvFilter;
 
@@ -29,7 +28,7 @@ where
         .init();
 
     let address = std::env::var("BENCH_ADDRESS")?;
-    let listener = TcpListener::bind(&address).await?;
+    let listener = crate::listener::bind(&address).await?;
     let mut http = http1::Builder::new();
     http.keep_alive(true).header_read_timeout(None).writev(true);
     let graceful = GracefulShutdown::new();

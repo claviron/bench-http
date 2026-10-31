@@ -89,6 +89,7 @@ during high-connection runs. The shell's hard limit must permit this value.
 
 ```sh
 export BENCH_ADDRESS=127.0.0.1:8080
+export BENCH_BACKLOG=2048
 export RUST_LOG=info
 ./target/release/axum
 ```
@@ -139,12 +140,37 @@ Stop Tokio before starting Mio on the same address (Unix):
 
 `--threads` defaults to the available CPU count. These are server threads
 inside one process, independent of `wrk -t`. `--backlog` declares the requested
-listen backlog per socket (default 1024); the OS may cap it. Mio reads
-`BENCH_ADDRESS` and enables `TCP_NODELAY`, like the other native TCP hosts.
+listen backlog per socket and overrides `BENCH_BACKLOG`; the OS may cap it.
+Mio reads `BENCH_ADDRESS` and enables `TCP_NODELAY`, like the other native TCP hosts.
 
 Axum reads `BENCH_ADDRESS` directly and enables `TCP_NODELAY`. Claviron reads
 the same address through `config/http.yaml`, runs in production mode
 and disables access logging through `config/vhost.yaml`.
+
+### Listen backlog
+
+`BENCH_BACKLOG` sets the requested TCP listen backlog for `axum`, `tokio`,
+`mio`, `hyper`, `hyper-control` and `tower`. It is read once at startup and
+defaults to **2048** when unset. Change it when launching a process; rebuilding
+is unnecessary:
+
+```sh
+BENCH_ADDRESS=127.0.0.1:8080 BENCH_BACKLOG=4096 ./target/release/hyper
+```
+
+Values must be integers from 1 to 2147483647. Empty, zero, negative and invalid
+values fail startup. Mio's explicit `--backlog` takes precedence over the
+environment setting. Its backlog applies to each `SO_REUSEPORT` listener.
+
+**Bypass does not use `BENCH_BACKLOG`: its Claviron-owned listener currently
+requests a fixed backlog of 1024.** No Claviron library change is included here.
+
+The backlog bounds pending connections waiting for acceptance, not active
+keep-alive connections or in-flight HTTP requests. The OS can cap the requested
+value (for example, Linux uses `net.core.somaxconn`); a larger system cap does
+not enlarge a smaller application request. Verify the effective value for each
+run. On Linux, `ss -lnt` shows the listen backlog in `Send-Q`. Set it consistently
+when comparing targets and retain timeout, overflow and retransmission counts.
 
 ## Tower policy comparison
 

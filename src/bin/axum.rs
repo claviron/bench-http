@@ -7,7 +7,6 @@ use axum::serve::ListenerExt;
 use axum::{Json, Router, routing::get};
 use http_body_util::BodyExt;
 
-use tokio::net::TcpListener;
 use tokio::signal;
 use tracing_subscriber::EnvFilter;
 
@@ -56,11 +55,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let address = std::env::var("BENCH_ADDRESS")?;
 
-    let listener = TcpListener::bind(&address).await?.tap_io(|stream| {
-        if let Err(error) = stream.set_nodelay(true) {
-            tracing::error!("TCP_NODELAY setup failed: {error}");
-        }
-    });
+    let listener = bench_http::listener::bind(&address)
+        .await?
+        .tap_io(|stream| {
+            if let Err(error) = stream.set_nodelay(true) {
+                tracing::error!("TCP_NODELAY setup failed: {error}");
+            }
+        });
 
     let app = Router::new().route("/json", get(json));
 

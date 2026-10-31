@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use bench_http::http1::{Answer, parse_head};
 use bytes::{Buf, BytesMut};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpStream;
 use tokio::signal;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
@@ -138,7 +138,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .without_time()
         .init();
 
-    let listener = TcpListener::bind(std::env::var("BENCH_ADDRESS")?).await?;
+    let listener = bench_http::listener::bind(std::env::var("BENCH_ADDRESS")?).await?;
     let (stop, receiver) = watch::channel(());
     let mut connections = JoinSet::new();
     let shutdown = shutdown_signal();
