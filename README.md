@@ -86,12 +86,55 @@ and backlog through `config/http.yaml`, runs in production mode, and disables
 access logging through `config/vhost.yaml`:
 
 ```sh
-./target/release/claviron-other --config-dir config --name bench-http --fleet bhttp
+scripts/run.sh claviron-other --config-dir config --name bench-http --fleet bhttp
 ```
 
 With `--supervisor` selected at build time, `--workers 0` is standalone and a
 positive count starts supervised worker processes. The counter remains local
 to each process. Mio's `--threads N` selects Poll threads inside one process.
+
+The launcher supplies `BENCH_HTTP_EXECUTION=shared` when unset. The top-level
+`plain_execution` field in `config/http.yaml` reads that value through the config
+API. Direct binary launches must supply the variable explicitly.
+
+### Axum execution comparison
+
+Build `claviron-axum` once with supervisor support. Use that same binary for all
+three cases:
+
+```sh
+python3 scripts/build.py --native --target claviron-axum --supervisor
+```
+
+Start each case separately, stopping the previous server first:
+
+```sh
+# Standalone, shared Tokio runtime.
+BENCH_HTTP_EXECUTION=shared scripts/run.sh claviron-axum --workers 0
+
+# Multiple processes, each using its shared Tokio runtime.
+BENCH_HTTP_EXECUTION=shared scripts/run.sh claviron-axum --workers 4
+
+# Same process count, each with a listener-owned HTTP executor.
+BENCH_HTTP_EXECUTION=current_thread scripts/run.sh claviron-axum --workers 4
+```
+
+The two supervised cases must use the same worker count; four is an example.
+Keep the address, backlog, workload and wrk parameters identical in all cases.
+The first two show the effect of worker count with the default shared runtimes;
+the latter two compare HTTP execution at a fixed worker count. The first and
+last show their combined effect.
+
+Report serving-process CPU/request, requests/s, p99 and all error counters for
+each case. Sum CPU time across the serving workers; report the supervisor's CPU
+separately so HTTP execution cost and total process-management cost remain visible.
+
+`shared` uses each serving process's main Tokio runtime. `current_thread` gives
+each serving process one executor thread per plain HTTP listener for accept,
+connections, HostPipeline and Axum handler polling. This configuration declares
+one listener. Other services keep the main runtime. The execution mode applies
+when the listener's runnable starts; reload does not migrate existing connections.
+No performance gain is assumed.
 
 All targets request the same declared TCP backlog and enable TCP_NODELAY. Native
 listeners default to 2048 when BENCH_BACKLOG is absent; Claviron requires the

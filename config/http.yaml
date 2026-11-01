@@ -1,3 +1,5 @@
+plain_execution: ${BENCH_HTTP_EXECUTION}
+
 listeners:
   benchmark:
     transport: tcp
