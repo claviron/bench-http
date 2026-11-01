@@ -16,7 +16,7 @@ CLAVIRON = ("claviron-other", "claviron-axum", "claviron-routable")
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--native", action="store_true", help="Optimize for this CPU")
-    parser.add_argument("--target", choices=("all", "native", "claviron", "brk", *NATIVE, *CLAVIRON),
+    parser.add_argument("--target", choices=("all", "native", "claviron", "brk", "brk-observe", *NATIVE, *CLAVIRON),
                         default="all", help="Select a group or one binary (default: all)")
     parser.add_argument("--supervisor", action="store_true",
                         help="Expose --workers on Claviron binaries")
@@ -28,7 +28,7 @@ def main():
     features = []
     if with_claviron:
         features = ["--features", "supervisor" if args.supervisor else "claviron"]
-    elif args.target == "brk":
+    elif args.target in ("brk", "brk-observe"):
         features = ["--features", "client"]
     env = os.environ.copy()
     if args.native:

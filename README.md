@@ -150,6 +150,18 @@ Shutdown drains owned work without a benchmark-specific termination timeout.
 The optional `brk` command uses the published `break` library to raise concurrent
 load until an acceptance phase breaks.
 
+Both client binaries are gated by the optional `client` feature:
+
+| Source | Binary | Purpose |
+| --- | --- | --- |
+| `src/client.rs` | `brk` | The break CLI, with phase outcomes and the tested acceptance boundary. |
+| `src/measure/main.rs` | `brk-observe` | The library runner with phase-boundary Linux CPU measurements and JSONL output. |
+
+Select a client explicitly with the Python build script. Neither client is part
+of the default server group, and neither requires the Claviron feature. The
+`brk` binary delegates to the library's CLI; `brk-observe` supplies its own
+`Observer` to the same library runner.
+
 ```sh
 python3 scripts/build.py --native --target brk
 ./target/release/brk http://127.0.0.1:8080/plain \
@@ -170,6 +182,98 @@ group unchanged and does not enable Claviron.
 Library consumers can implement `Observer::phase_started` and `phase_finished`
 to sample server CPU/RSS around each phase. End callbacks follow drain, including
 failed phases. Keep server and generator resource measurements separate.
+
+#### Phase CPU measurements on Linux
+
+`brk-observe` uses the library's `Observer` callbacks and Linux process counters
+to record each phase's SLA outcomes and CPU deltas in a new JSONL file:
+
+```sh
+python3 scripts/build.py --native --target brk-observe
+./target/release/brk-observe http://127.0.0.1:8080/plain \
+  --server-pid "$SERVER_PID" --output phases.jsonl \
+  --conn 256 --start 1 --pace 1 --phase 10s --timeout 16ms \
+  --accept 99.99 --max 16 --expect-body 'Hello, World!'
+```
+
+For a supervised server, supply every serving worker through repeated
+`--server-pid` arguments or a comma-separated list, and identify the supervisor
+with `--master-pid`. The caller supplies and owns this stable process set; the
+client never discovers, starts or signals server processes. `--check-only`
+validates the plan and PID counters without DNS or target traffic. It still
+requires a new output filename.
+
+For example, after identifying the serving worker PIDs and master PID of a
+running supervised server:
+
+```sh
+./target/release/brk-observe http://127.0.0.1:8080/plain \
+  --server-pid "$WORKER_PIDS" --master-pid "$MASTER_PID" \
+  --output counter-check.jsonl --check-only \
+  --conn 256 --start 1 --pace 1 --phase 10s --timeout 16ms \
+  --accept 99.99 --max 16 --expect-body 'Hello, World!'
+```
+
+Here `WORKER_PIDS` is a comma-separated list. After validation, run the same
+command without `--check-only`, using a different output filename, to apply
+load. `--check-only` does not exercise traffic, deadlines or acceptance.
+
+Each `phase_finished` record contains the phase's attempted/successful/error
+counts, acceptance decision, successful requests/s, and serving, master, total
+runtime and client CPU seconds. Serving CPU sums workers' own user+system time;
+master and client are separate. Child CPU fields and an extra division by worker
+count are never used. Per-process deltas, process birth counters and the system
+clock-tick frequency are retained. A changed/missing PID, decreasing counter or
+output failure cancels the run and invalidates CPU measurement rather than
+reporting a server capacity limit.
+
+Workers are gated before the start sample and drained before the finish sample.
+PID reads are sequential, not atomic; records include both sampling spans and
+the CPU accounting window. CPU precision follows the OS clock ticks. Client CPU
+includes work inside that process between samples, including some observer
+overhead; record formatting/output occurs outside the samples. Serving CPU
+includes background work inside those processes. No latency percentile is
+invented from the SLA deadline.
+
+CPU per attempt and per successful response have explicit denominators; a zero
+denominator produces `null`. Compare CPU efficiency at the same accepted phase
+and account for errors rather than equating averages from different ramp lengths.
+The final record distinguishes `sla_broken`, `ceiling_reached`, cancellation,
+client/protocol failures and invalid CPU measurement. Exit codes are 0 for the
+declared ceiling, 1 for SLA failure, 2 for measurement/client/protocol/plan errors,
+and 130 for cancellation. The JSONL file retains completed phases and is never
+overwritten.
+
+Read the output as one JSON object per line:
+
+| `event` | Meaning |
+| --- | --- |
+| `plan` | URL, load/SLA parameters, expected body and process roles. |
+| `phase_started` | The next load level, before worker release. |
+| `phase_finished` | Drained phase outcomes, acceptance and matching CPU samples. |
+| `result` | Final outcome, total counts, last accepted and last tested phase. |
+| `check_only` | Counter validation only; `traffic_started` is false. |
+
+In each measured phase, `cpu.serving`, `cpu.master`, `cpu.client` and
+`cpu.total_runtime` contain user, system and total CPU seconds. `cpu.processes`
+retains each PID's role, birth counter and own CPU delta. A standalone target
+has no master measurement. `connections_at_target` verifies whether every
+connection owner established its requested pipeline depth.
+
+For the example plan, 256 fixed connections and pipeline depths 1 through 16
+produce phases of 256, 512, ..., 4096 outstanding requests. There are at most
+16 ten-second admission windows per target, plus setup and drain; the first
+failed phase ends the ramp. Successful responses must have the exact expected
+body and complete within 16 ms at a ratio of at least 99.99%. Reaching the final
+level successfully records a tested ceiling, not a discovered breakpoint.
+
+To compare targets, start and validate one server, supply its serving PIDs, run
+the client, retain the JSONL file, then stop that server before selecting the
+next. Keep the URL/workload, connection count, load steps, deadline, acceptance,
+backlog and descriptor limits identical. Declare each server's process/executor
+topology and use a fresh file for every run. Compare the last accepted and first
+rejected phase, then compare throughput and CPU at shared load levels. A client
+resource, protocol or measurement error is not evidence of a server SLA limit.
 
 ### Fixed load
 
