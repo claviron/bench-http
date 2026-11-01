@@ -147,8 +147,9 @@ Shutdown drains owned work without a benchmark-specific termination timeout.
 
 ### Acceptance capacity
 
-The optional `brk` command uses the published `break` library to raise concurrent
-load until an acceptance phase breaks.
+The optional `brk` command uses the `break` source library to raise concurrent
+load until an acceptance phase breaks. Its manifest path selects unreleased load
+diagnostics; crates.io 0.1.0 does not contain them.
 
 Both client binaries are gated by the optional `client` feature:
 
@@ -226,6 +227,17 @@ count are never used. Per-process deltas, process birth counters and the system
 clock-tick frequency are retained. A changed/missing PID, decreasing counter or
 output failure cancels the run and invalidates CPU measurement rather than
 reporting a server capacity limit.
+
+Schema 2 adds observed mean outstanding, target coverage, connection time at full
+depth, active/drain times, setup attempts/time, blocked writes and send/deadline
+diagnostics under `load`. Raw nanosecond integrals are decimal strings, preserving
+their integer precision. `connections_at_target` means first attainment per owner,
+not sustained or simultaneous global load. No extra coverage threshold is applied.
+Failed attempts distinguish timeout, transport, abandoned followers and TCP setup.
+An initial rejection reports `initial_load_rejected`. `observed_sla_boundary`
+requires a passing level followed by an SLA rejection; it makes no attribution to
+the server alone and is not a confidence interval. Setup errors and local resource
+failures have different outcome labels.
 
 Workers are gated before the start sample and drained before the finish sample.
 PID reads are sequential, not atomic; records include both sampling spans and

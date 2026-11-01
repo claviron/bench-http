@@ -5,13 +5,13 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use brk::{
-    Acceptance, BreakReason, CancellationToken, Counts, Observer, Phase, PhaseStats, Plan, Stats,
-    Target,
+    Acceptance, CancellationToken, Counts, Observer, Phase, PhaseStats, Plan, Stats, Target,
 };
 use clap::Parser;
 use serde_json::{Value, json};
 
 use super::cpu::{Probe, Snapshot};
+use super::outcome::classify;
 
 #[derive(Parser)]
 #[command(
@@ -54,6 +54,7 @@ struct Args {
 fn counts(counts: Counts) -> Value {
     json!({"sent": counts.sent, "attempted": counts.attempted, "successful": counts.successful,
         "failed": counts.failed(), "timeout": counts.timeout, "transport": counts.transport,
+        "abandoned": counts.abandoned, "connect": counts.connect, "connect_timeout": counts.connect_timeout,
         "status": counts.status, "body": counts.body})
 }
 
@@ -102,6 +103,21 @@ impl Measurements {
             "cancelled": stats.cancelled, "accepted": stats.accepted(self.acceptance),
             "success_ratio": (stats.counts.attempted > 0).then(|| stats.counts.successful as f64 / stats.counts.attempted as f64),
             "successful_requests_per_second": stats.requests_per_sec(),
+            "load": {
+                "active_seconds": stats.load.active_elapsed.as_secs_f64(),
+                "drain_seconds": stats.drain_elapsed().as_secs_f64(),
+                "mean_outstanding": stats.load.mean_outstanding(),
+                "target_fraction": stats.load.target_fraction(stats.phase.total_concurrency),
+                "connection_target_fraction": stats.load.connection_target_fraction(stats.phase.connections),
+                "outstanding_request_nanoseconds": stats.load.outstanding_request_nanos.to_string(),
+                "connection_nanoseconds_at_target": stats.load.connection_nanos_at_target.to_string(),
+                "latest_connection_first_target_seconds": stats.load.latest_first_target.map(|time| time.as_secs_f64()),
+                "connect_attempts": stats.load.connect_attempts,
+                "connect_seconds": stats.load.connect_nanos as f64 / 1e9,
+                "write_blocked": stats.load.write_blocked,
+                "max_send_delay_seconds": stats.load.max_send_delay.as_secs_f64(),
+                "max_deadline_lateness_seconds": stats.load.max_deadline_lateness.as_secs_f64()
+            },
             "serving_cpu_us_per_attempt": per_request(cpu.serving.total_seconds, stats.counts.attempted),
             "serving_cpu_us_per_success": per_request(cpu.serving.total_seconds, stats.counts.successful),
             "total_runtime_cpu_us_per_success": per_request(cpu.total_runtime.total_seconds, stats.counts.successful),
@@ -109,9 +125,11 @@ impl Measurements {
             "cpu": cpu});
         self.record(&measured)?;
         println!(
-            "Phase {}: {} outstanding, accepted={}, successful={}, failed={}",
+            "Phase {}: target={}, mean-outstanding={:.2}, target-coverage={:.2}%, accepted={}, successful={}, failed={}",
             stats.phase.index,
             stats.phase.total_concurrency,
+            stats.load.mean_outstanding(),
+            stats.load.target_fraction(stats.phase.total_concurrency) * 100.0,
             stats.accepted(self.acceptance),
             stats.counts.successful,
             stats.counts.failed()
@@ -150,19 +168,6 @@ fn boundary(stats: &Stats) -> Value {
         "last_tested": stats.last_phase.as_ref().map(|s| phase(&s.phase))})
 }
 
-fn outcome(reason: &BreakReason) -> (&'static str, u8) {
-    match reason {
-        BreakReason::Acceptance => ("sla_broken", 1),
-        BreakReason::Cancelled => ("cancelled", 130),
-        BreakReason::Unfulfilled => ("client_unfulfilled", 2),
-        BreakReason::Protocol(_) => ("protocol_error", 2),
-        BreakReason::Io(_) | BreakReason::Resources(_) | BreakReason::Worker(_) => {
-            ("client_error", 2)
-        }
-        BreakReason::Invalid(_) | BreakReason::Overflow => ("plan_error", 2),
-    }
-}
-
 pub fn execute() -> io::Result<ExitCode> {
     let args = Args::parse();
     let plan = Plan {
@@ -192,7 +197,7 @@ pub fn execute() -> io::Result<ExitCode> {
         acceptance,
         error: None,
     };
-    measurements.record(&json!({"event": "plan", "schema_version": 1, "url": args.url,
+    measurements.record(&json!({"event": "plan", "schema_version": 2, "url": args.url,
         "server_pids": args.server_pid, "master_pid": args.master_pid, "client_pid": std::process::id(),
         "conn": plan.conn, "start": plan.start, "pace": plan.pace, "phase_seconds": plan.phase_duration.as_secs_f64(),
         "timeout_seconds": plan.timeout.as_secs_f64(), "accept_percent": plan.accept,
@@ -219,18 +224,19 @@ pub fn execute() -> io::Result<ExitCode> {
     };
     if let Some(error) = measurements.error.take() {
         measurements.record(&json!({"event": "result", "outcome": "measurement_error",
-            "server_capacity_claim": false, "reason": error.to_string(), "boundary": boundary(stats)}))?;
+            "observed_sla_boundary": false, "reason": error.to_string(), "boundary": boundary(stats)}))?;
         return Err(error);
     }
     let (label, code, reason) = match &result {
         Ok(_) => ("ceiling_reached", 0, None),
         Err(broken) => {
-            let (label, code) = outcome(&broken.reason);
+            let (label, code) = classify(broken);
             (label, code, Some(broken.reason.to_string()))
         }
     };
     measurements.record(&json!({"event": "result", "outcome": label,
-        "server_capacity_claim": label == "sla_broken", "reason": reason, "boundary": boundary(stats)}))?;
+        "observed_sla_boundary": result.as_ref().err().is_some_and(|broken| broken.has_capacity_boundary()),
+        "reason": reason, "boundary": boundary(stats)}))?;
     println!("Result: {label}");
     Ok(ExitCode::from(code))
 }

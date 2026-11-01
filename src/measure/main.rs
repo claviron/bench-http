@@ -1,10 +1,12 @@
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", all(test, unix)))]
 mod cpu;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", all(test, unix)))]
 mod observe;
+#[cfg(any(target_os = "linux", test))]
+mod outcome;
 
 fn main() -> std::process::ExitCode {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", all(test, unix)))]
     match observe::execute() {
         Ok(code) => code,
         Err(error) => {
@@ -13,7 +15,7 @@ fn main() -> std::process::ExitCode {
         }
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", all(test, unix))))]
     {
         eprintln!("brk-observe requires Linux process CPU counters");
         std::process::ExitCode::from(2)

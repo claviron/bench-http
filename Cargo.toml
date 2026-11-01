@@ -25,7 +25,7 @@ socket2 = { version = "0.6", features = ["all"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "io-util", "sync"] }
 
 # Command line
-brk = { package = "break", version = "0.1.0", default-features = false, features = ["cli"], optional = true }
+brk = { package = "break", version = "0.1.0", path = "../../break", default-features = false, features = ["cli"], optional = true }
 humantime = { version = "2", optional = true }
 libc = { version = "0.2", optional = true }
 clap = { version = "4", features = ["derive"] }
