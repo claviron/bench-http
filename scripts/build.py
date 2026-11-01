@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build selected native or Claviron HTTP hosts with the same release profile."""
+"""Build selected HTTP hosts or the capacity client with the release profile."""
 
 import argparse
 import json
@@ -16,7 +16,7 @@ CLAVIRON = ("claviron-other", "claviron-axum", "claviron-routable")
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--native", action="store_true", help="Optimize for this CPU")
-    parser.add_argument("--target", choices=("all", "native", "claviron", *NATIVE, *CLAVIRON),
+    parser.add_argument("--target", choices=("all", "native", "claviron", "brk", *NATIVE, *CLAVIRON),
                         default="all", help="Select a group or one binary (default: all)")
     parser.add_argument("--supervisor", action="store_true",
                         help="Expose --workers on Claviron binaries")
@@ -25,7 +25,11 @@ def main():
     with_claviron = any(target in CLAVIRON for target in targets)
     if args.supervisor and not with_claviron:
         parser.error("--supervisor requires a Claviron target")
-    features = ["--features", "supervisor" if args.supervisor else "claviron"] if with_claviron else []
+    features = []
+    if with_claviron:
+        features = ["--features", "supervisor" if args.supervisor else "claviron"]
+    elif args.target == "brk":
+        features = ["--features", "client"]
     env = os.environ.copy()
     if args.native:
         env["RUSTFLAGS"] = (env.get("RUSTFLAGS", "") + " -C target-cpu=native").strip()

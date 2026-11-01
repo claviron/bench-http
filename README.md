@@ -145,6 +145,34 @@ Shutdown drains owned work without a benchmark-specific termination timeout.
 
 ## Measure
 
+### Acceptance capacity
+
+The optional `brk` command uses the published `break` library to raise concurrent
+load until an acceptance phase breaks.
+
+```sh
+python3 scripts/build.py --native --target brk
+./target/release/brk http://127.0.0.1:8080/plain \
+  --conn 4 --start 1 --pace 1 --phase 10s --timeout 2s --accept 99.99 \
+  --expect-body 'Hello, World!'
+```
+
+`--conn` fixes the connection-owner count. Phase zero starts at `--start` concurrent
+requests per connection; each phase adds `--pace`. Completed requests are replaced
+immediately. There is no warmup or request-rate target. Plain HTTP/1.1 uses real
+pipelining; a client-side outstanding request need not be executing on the server.
+Counters reset each phase, with pending attempts drained under their original
+deadlines. The report distinguishes the last accepted level, acceptance failure,
+and client I/O/resource/protocol limits. `--max` optionally caps requests per
+connection without claiming a breakpoint. Building `brk` leaves the default server
+group unchanged and does not enable Claviron.
+
+Library consumers can implement `Observer::phase_started` and `phase_finished`
+to sample server CPU/RSS around each phase. End callbacks follow drain, including
+failed phases. Keep server and generator resource measurements separate.
+
+### Fixed load
+
 Preflight the expected status, content type and body before applying load:
 
 ```sh
