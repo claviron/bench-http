@@ -239,6 +239,16 @@ requires a passing level followed by an SLA rejection; it makes no attribution t
 the server alone and is not a confidence interval. Setup errors and local resource
 failures have different outcome labels.
 
+Schema 3 adds `request_latency` to each finished phase: `completed_responses`,
+the exact `total_nanoseconds` as a decimal string, and `mean_ms` (`null` without
+a complete response). The console also prints the mean for every phase. Timing
+starts at request admission after TCP setup and ends after complete HTTP response
+validation, including drain. It includes send backpressure and queueing, not only
+handler execution. Fully decoded late or invalid replies contribute; incomplete
+timeouts and abandoned attempts do not contribute zero-duration samples. Always
+read the sample count and error counts with the mean. Connection setup remains
+separate under `load`; the existing SLA/deadline behavior is unchanged.
+
 Workers are gated before the start sample and drained before the finish sample.
 PID reads are sequential, not atomic; records include both sampling spans and
 the CPU accounting window. CPU precision follows the OS clock ticks. Client CPU

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use brk::{Counts, LoadStats, Phase, PhaseStats, Stats};
+use brk::{Counts, LatencyStats, LoadStats, Phase, PhaseStats, Stats};
 
 use super::*;
 
@@ -21,6 +21,7 @@ fn measured() -> PhaseStats {
         elapsed: Duration::from_secs(1),
         connections_at_target: 1,
         load: LoadStats::default(),
+        latency: LatencyStats::default(),
         completed: true,
         cancelled: false,
     }

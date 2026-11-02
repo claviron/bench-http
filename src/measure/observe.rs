@@ -103,6 +103,11 @@ impl Measurements {
             "cancelled": stats.cancelled, "accepted": stats.accepted(self.acceptance),
             "success_ratio": (stats.counts.attempted > 0).then(|| stats.counts.successful as f64 / stats.counts.attempted as f64),
             "successful_requests_per_second": stats.requests_per_sec(),
+            "request_latency": {
+                "completed_responses": stats.latency.responses,
+                "total_nanoseconds": stats.latency.total_nanos.to_string(),
+                "mean_ms": stats.latency.mean_millis()
+            },
             "load": {
                 "active_seconds": stats.load.active_elapsed.as_secs_f64(),
                 "drain_seconds": stats.drain_elapsed().as_secs_f64(),
@@ -124,6 +129,13 @@ impl Measurements {
             "client_cpu_us_per_success": per_request(cpu.client.total_seconds, stats.counts.successful),
             "cpu": cpu});
         self.record(&measured)?;
+        match stats.latency.mean_millis() {
+            Some(mean) => println!(
+                "Request average: {mean:.3} ms over {} complete responses (TCP setup excluded)",
+                stats.latency.responses
+            ),
+            None => println!("Request average: n/a (no complete response)"),
+        }
         println!(
             "Phase {}: target={}, mean-outstanding={:.2}, target-coverage={:.2}%, accepted={}, successful={}, failed={}",
             stats.phase.index,
@@ -197,7 +209,8 @@ pub fn execute() -> io::Result<ExitCode> {
         acceptance,
         error: None,
     };
-    measurements.record(&json!({"event": "plan", "schema_version": 2, "url": args.url,
+    measurements.record(&json!({"event": "plan", "schema_version": 3, "url": args.url,
+        "request_latency_includes_connection_setup": false,
         "server_pids": args.server_pid, "master_pid": args.master_pid, "client_pid": std::process::id(),
         "conn": plan.conn, "start": plan.start, "pace": plan.pace, "phase_seconds": plan.phase_duration.as_secs_f64(),
         "timeout_seconds": plan.timeout.as_secs_f64(), "accept_percent": plan.accept,
