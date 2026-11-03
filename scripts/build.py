@@ -10,7 +10,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ("tokio", "mio", "hyper", "axum")
-CLAVIRON = ("claviron-other", "claviron-axum", "claviron-routable")
+CLAVIRON = ("claviron-other", "claviron-axum", "claviron-warp", "claviron-routable")
 
 
 def main():
@@ -27,7 +27,10 @@ def main():
         parser.error("--supervisor requires a Claviron target")
     features = []
     if with_claviron:
-        features = ["--features", "supervisor" if args.supervisor else "claviron"]
+        selected = ["supervisor" if args.supervisor else "claviron"]
+        if "claviron-warp" in targets:
+            selected.append("warp")
+        features = ["--features", ",".join(selected)]
     elif args.target in ("brk", "brk-observe"):
         features = ["--features", "client"]
     env = os.environ.copy()

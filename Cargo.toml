@@ -10,6 +10,7 @@ autobins = false
 [features]
 default = []
 claviron = ["dep:claviron"]
+warp = ["claviron", "claviron/warp"]
 supervisor = ["claviron", "claviron/supervisor"]
 client = ["dep:brk", "dep:humantime", "dep:libc"]
 
@@ -78,6 +79,11 @@ required-features = ["claviron"]
 name = "claviron-axum"
 path = "src/claviron/axum.rs"
 required-features = ["claviron"]
+
+[[bin]]
+name = "claviron-warp"
+path = "src/claviron/warp.rs"
+required-features = ["warp"]
 
 [[bin]]
 name = "claviron-routable"

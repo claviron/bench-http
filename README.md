@@ -13,11 +13,17 @@ serve the same plain and JSON workloads with mimalloc in one process by default.
 | `src/native/axum.rs` | `axum` | Native `axum::serve` and Axum router. |
 | `src/claviron/other.rs` | `claviron-other` | Registered terminal `OtherHandler`. |
 | `src/claviron/axum.rs` | `claviron-axum` | Registered dedicated Axum router, identical to native Axum. |
+| `src/claviron/warp.rs` | `claviron-warp` | Registered Warp filters through Claviron's HTTP adapter. |
 | `src/claviron/routable.rs` | `claviron-routable` | Provider-registered `Routable` contribution in the configured host chain. |
 
-`Other` and dedicated Axum own their replies. A `Routable` contribution may return
+`Other`, Axum and Warp own their replies, including 404 responses. They run after
+the host's configured HostPipeline layers. A `Routable` contribution may return
 `Unhandled` with the unread request body so the configured chain can continue.
 Claviron performs host admission and response policy around each registered owner.
+
+Host declarations belong in `config/vhost.yaml`. These registrations only attach
+routers or handlers to its canonical host; they do not declare additional hosts
+or read a separate `bench.yaml`.
 
 `src/support/` holds the shared payload, HTTP handlers, Axum router, TCP parser,
 listener settings, logging/shutdown and Claviron CLI setup.
@@ -34,9 +40,9 @@ listener settings, logging/shutdown and Claviron CLI setup.
 ```
 
 Plain requests drain any supplied body without decoding it. Empty bodies skip
-collection in the Hyper/Axum/Claviron handlers. Axum uses its own request extractor
-and `Json` response. Hyper and Other share the same handler; Routable delegates
-to that handler after claiming the path.
+collection in the Hyper/Axum/Other handlers. Axum uses its own request extractor
+and `Json` response; Warp uses its body filter and JSON reply. Hyper and Other
+share the same handler; Routable delegates to that handler after claiming the path.
 
 Mio/Tokio reuse connection buffers and vectored writes. Their limited parser
 supports HTTP/1.1 Content-Length bodies, pipelining and connection close;
@@ -59,10 +65,16 @@ from the dependency's `path` and checks its declared version.
 python3 scripts/build.py --native
 ```
 
-The default target is `all`. `--target claviron` builds only the three Claviron
+The default target is `all`. `--target claviron` builds only the four Claviron
 entries; a binary name selects one target. `--supervisor` exposes `--workers` on
 Claviron entries. The script reports the source location, version and Git revision
 selected by Cargo; it does not rewrite the manifest or generate source overrides.
+
+Warp's optional feature is selected only when a build includes `claviron-warp`:
+
+```sh
+python3 scripts/build.py --native --target claviron-warp --supervisor
+```
 
 Every target uses the same release profile: opt-level 3, one codegen unit, fat
 LTO, no debug information and panic unwinding. `--native` selects the build CPU;
@@ -93,9 +105,9 @@ With `--supervisor` selected at build time, `--workers 0` is standalone and a
 positive count starts supervised worker processes. The counter remains local
 to each process. Mio's `--threads N` selects Poll threads inside one process.
 
-The launcher supplies `BENCH_HTTP_EXECUTION=shared` when unset. The top-level
-`plain_execution` field in `config/http.yaml` reads that value through the config
-API. Direct binary launches must supply the variable explicitly.
+The launcher supplies `BENCH_HTTP_EXECUTION=shared` when unset.
+`listeners.benchmark.execution` in `config/http.yaml` reads that value through
+the config API. Direct binary launches must supply the variable explicitly.
 
 ### Axum execution comparison
 
@@ -135,6 +147,9 @@ connections, HostPipeline and Axum handler polling. This configuration declares
 one listener. Other services keep the main runtime. The execution mode applies
 when the listener's runnable starts; reload does not migrate existing connections.
 No performance gain is assumed.
+
+Use `claviron-warp` in the same commands to compare Warp with identical listener,
+executor and supervisor settings.
 
 All targets request the same declared TCP backlog and enable TCP_NODELAY. Native
 listeners default to 2048 when BENCH_BACKLOG is absent; Claviron requires the

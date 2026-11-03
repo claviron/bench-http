@@ -3,13 +3,13 @@
 set -euo pipefail
 
 usage() {
-    echo 'Usage: scripts/run.sh <claviron-other|claviron-axum|claviron-routable> [SERVER_ARGS...]'
+    echo 'Usage: scripts/run.sh <claviron-other|claviron-axum|claviron-warp|claviron-routable> [SERVER_ARGS...]'
     echo 'BENCH_HTTP_EXECUTION: shared (default) or current_thread'
 }
 
 case "${1-}" in
     -h|--help) usage; exit 0 ;;
-    claviron-other|claviron-axum|claviron-routable) binary="$1"; shift ;;
+    claviron-other|claviron-axum|claviron-warp|claviron-routable) binary="$1"; shift ;;
     *) usage >&2; exit 2 ;;
 esac
 

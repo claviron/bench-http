@@ -1,7 +1,6 @@
-plain_execution: ${BENCH_HTTP_EXECUTION}
-
 listeners:
   benchmark:
+    execution: ${BENCH_HTTP_EXECUTION}
     transport: tcp
     tls: false
     protocols: h1
