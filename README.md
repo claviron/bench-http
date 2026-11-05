@@ -9,7 +9,7 @@ serve the same plain and JSON workloads with mimalloc in one process by default.
 | --- | --- | --- |
 | `src/native/tokio.rs` | `tokio` | Tokio TCP tasks and a small HTTP/1 parser. |
 | `src/native/mio.rs` | `mio` | One Mio Poll loop and reuse-port listener per thread. |
-| `src/native/hyper.rs` | `hyper` | Native Hyper HTTP/1 service, over TLS when a certificate is supplied. |
+| `src/native/hyper.rs` | `hyper` | Native Hyper service: HTTP/1.1 or HTTP/2, over TLS when a certificate is supplied. |
 | `src/native/axum.rs` | `axum` | Native `axum::serve` and Axum router. |
 | `src/claviron/other.rs` | `claviron-other` | Registered terminal `OtherHandler`. |
 | `src/claviron/axum.rs` | `claviron-axum` | Registered dedicated Axum router, identical to native Axum. |
@@ -209,6 +209,39 @@ address and trusts the store's authority. Certificate verification is always on:
 completes its handshake during setup and is then reused, so these runs measure
 requests on established TLS connections. They do not measure handshake rate or
 session resumption. Compare TLS runs only with TLS runs.
+
+### HTTP/2
+
+Both hosts also speak HTTP/2 over the same certificate store. Native Hyper
+selects it with `BENCH_HTTP=2`; it then offers only `h2` in the TLS handshake,
+or expects prior knowledge without TLS:
+
+```sh
+export BENCH_HTTP=2
+export BENCH_TLS_CERT=certs/servers/benchmark.test/fullchain.pem
+export BENCH_TLS_KEY=certs/servers/benchmark.test/privkey.pem
+./target/release/hyper
+```
+
+Claviron reads `config/h2/`: the TLS listener and the default host with
+`h2` as their only protocol. Claviron serves HTTP/2 over TLS only.
+
+```sh
+scripts/run.sh claviron-other --config-dir config/h2 --name bench-h2 --fleet bhtwo
+```
+
+The client adds `--http2`. The request test then raises concurrent streams on
+each connection instead of pipelined requests:
+
+```sh
+./target/release/brk https://benchmark.test/plain --http2 \
+  --connect 127.0.0.1:8080 --cacert certs/ca/bench/ca.crt \
+  --conn 1024 --start 1 --pace 1 --phase 60s --timeout 100ms
+```
+
+`brk-observe` takes the same `--http2` and records it in the plan. Compare
+HTTP/2 runs only with HTTP/2 runs: a level is streams here and pipelined
+requests there, and the two load a server differently.
 
 ## Measure
 

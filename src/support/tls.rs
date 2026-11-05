@@ -8,9 +8,22 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio_rustls::TlsAcceptor;
 
+/// Whether the host speaks HTTP/2: `BENCH_HTTP=2`. Absent or `1` is HTTP/1.1.
+pub fn http2_from_env() -> io::Result<bool> {
+    match std::env::var("BENCH_HTTP").as_deref() {
+        Err(std::env::VarError::NotPresent) | Ok("1") => Ok(false),
+        Ok("2") => Ok(true),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "BENCH_HTTP must be 1 or 2",
+        )),
+    }
+}
+
 /// `BENCH_TLS_CERT` names the PEM chain and `BENCH_TLS_KEY` its private key.
-/// Both or neither: one without the other is a configuration error.
-pub fn acceptor_from_env() -> io::Result<Option<TlsAcceptor>> {
+/// Both or neither: one without the other is a configuration error. The
+/// protocol offered in the handshake is the one the host speaks.
+pub fn acceptor_from_env(http2: bool) -> io::Result<Option<TlsAcceptor>> {
     let chain = std::env::var_os("BENCH_TLS_CERT");
     let key = std::env::var_os("BENCH_TLS_KEY");
     let (chain, key) = match (chain, key) {
@@ -35,6 +48,7 @@ pub fn acceptor_from_env() -> io::Result<Option<TlsAcceptor>> {
     .with_no_client_auth()
     .with_single_cert(chain, key)
     .map_err(io::Error::other)?;
-    config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    config.alpn_protocols =
+        vec![if http2 { b"h2".to_vec() } else { b"http/1.1".to_vec() }];
     Ok(Some(TlsAcceptor::from(Arc::new(config))))
 }

@@ -49,6 +49,9 @@ struct Common {
     /// For https://, make every handshake a full one instead of resuming.
     #[arg(long)]
     no_resume: bool,
+    /// Speak HTTP/2, as `brk --http2` does.
+    #[arg(long)]
+    http2: bool,
     /// For https://, offer only this TLS version: 1.2 or 1.3.
     #[arg(long, value_name = "VERSION")]
     tls_version: Option<String>,
@@ -335,6 +338,9 @@ pub fn execute() -> io::Result<ExitCode> {
     if args.no_resume {
         target = target.without_resumption();
     }
+    if args.http2 {
+        target = target.http2();
+    }
     if let Some(version) = &args.tls_version {
         target = target.tls_version(version).map_err(io::Error::other)?;
     }
@@ -375,7 +381,7 @@ pub fn execute() -> io::Result<ExitCode> {
         "server_pids": args.server_pid, "master_pid": args.master_pid, "client_pid": std::process::id(),
         "ramp": ramp, "phase_seconds": args.phase.as_secs_f64(),
         "timeout_seconds": args.timeout.as_secs_f64(), "accept_percent": args.accept,
-        "tls_resumption": !args.no_resume,
+        "http2": args.http2, "tls_resumption": !args.no_resume,
         "tls_offer": {"version": args.tls_version, "group": args.tls_group, "cipher": args.tls_cipher},
         "expect_body": args.expect_body,
         "check_only": args.check_only}))?;

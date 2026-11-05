@@ -1,0 +1,13 @@
+listeners:
+  benchmark:
+    execution: ${BENCH_HTTP_EXECUTION}
+    transport: tcp
+    tls: true
+    protocols: h2
+    listen: ${BENCH_ADDRESS}
+    tcp:
+      backlog: ${BENCH_BACKLOG}
+    requests:
+      max_body_size: off
+      body_read_timeout: off
+      head_timeout: null

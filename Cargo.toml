@@ -18,8 +18,8 @@ client = ["dep:brk", "dep:humantime", "dep:libc"]
 # HTTP hosts
 axum = "0.8"
 claviron = { version = "0.2.0-alpha.24", path = "../../claviron", default-features = false, features = ["edge", "axum", "tls"], optional = true }
-hyper = { version = "1", features = ["http1", "server"] }
-hyper-util = { version = "0.1", features = ["tokio", "server-graceful"] }
+hyper = { version = "1", features = ["http1", "http2", "server"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-graceful", "http2"] }
 httparse = "1"
 mio = { version = "1", features = ["os-poll", "net"] }
 socket2 = { version = "0.6", features = ["all"] }
@@ -31,7 +31,7 @@ rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", 
 tokio-rustls = { version = "0.26", default-features = false }
 
 # Command line
-brk = { package = "break", version = "0.1.0", path = "../break", default-features = false, features = ["cli", "tls"], optional = true }
+brk = { package = "break", version = "0.1.0", path = "../break", default-features = false, features = ["cli", "tls", "http2"], optional = true }
 humantime = { version = "2", optional = true }
 libc = { version = "0.2", optional = true }
 clap = { version = "4", features = ["derive"] }
