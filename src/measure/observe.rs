@@ -49,6 +49,15 @@ struct Common {
     /// For https://, make every handshake a full one instead of resuming.
     #[arg(long)]
     no_resume: bool,
+    /// For https://, offer only this TLS version: 1.2 or 1.3.
+    #[arg(long, value_name = "VERSION")]
+    tls_version: Option<String>,
+    /// For https://, offer only this key exchange group.
+    #[arg(long, value_name = "NAME")]
+    tls_group: Option<String>,
+    /// For https://, offer only this cipher suite.
+    #[arg(long, value_name = "NAME")]
+    tls_cipher: Option<String>,
     /// Serving PID(s), repeated or comma-separated; exclude the supervisor.
     #[arg(long, value_delimiter = ',', required = true)]
     server_pid: Vec<u32>,
@@ -198,6 +207,9 @@ impl Measurements {
                 "max_send_delay_seconds": stats.load.max_send_delay.as_secs_f64(),
                 "max_deadline_lateness_seconds": stats.load.max_deadline_lateness.as_secs_f64()
             },
+            "tls": stats.tls.map(|tls| json!({
+                "version": tls.version, "cipher": tls.cipher, "group": tls.group
+            })),
             "setups": stats.setups.map(|setups| json!({
                 "attempted": setups.attempted, "established": setups.established,
                 "failed": setups.failed, "timeout": setups.timeout, "resumed": setups.resumed,
@@ -213,6 +225,14 @@ impl Measurements {
             "client_cpu_us_per_success": per_request(cpu.client.total_seconds, stats.counts.successful),
             "cpu": cpu});
         self.record(&measured)?;
+        if let Some(tls) = &stats.tls {
+            println!(
+                "TLS: version={} cipher={} group={}",
+                tls.version,
+                tls.cipher,
+                tls.group.unwrap_or("none")
+            );
+        }
         if let Some(setups) = &stats.setups {
             println!(
                 "Connections: established={} of {} attempts, failed={}, timeout={}, resumed={}",
@@ -315,6 +335,15 @@ pub fn execute() -> io::Result<ExitCode> {
     if args.no_resume {
         target = target.without_resumption();
     }
+    if let Some(version) = &args.tls_version {
+        target = target.tls_version(version).map_err(io::Error::other)?;
+    }
+    if let Some(group) = &args.tls_group {
+        target = target.tls_group(group).map_err(io::Error::other)?;
+    }
+    if let Some(cipher) = &args.tls_cipher {
+        target = target.tls_cipher(cipher).map_err(io::Error::other)?;
+    }
     let probe = Probe::new(&args.server_pid, args.master_pid)?;
     let writer = BufWriter::new(
         OpenOptions::new()
@@ -346,7 +375,9 @@ pub fn execute() -> io::Result<ExitCode> {
         "server_pids": args.server_pid, "master_pid": args.master_pid, "client_pid": std::process::id(),
         "ramp": ramp, "phase_seconds": args.phase.as_secs_f64(),
         "timeout_seconds": args.timeout.as_secs_f64(), "accept_percent": args.accept,
-        "tls_resumption": !args.no_resume, "expect_body": args.expect_body,
+        "tls_resumption": !args.no_resume,
+        "tls_offer": {"version": args.tls_version, "group": args.tls_group, "cipher": args.tls_cipher},
+        "expect_body": args.expect_body,
         "check_only": args.check_only}))?;
     if let Some(body) = args.expect_body {
         target = target.expect_body(body.into_bytes());

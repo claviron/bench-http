@@ -342,7 +342,10 @@ connection test each finished phase has a `setups` object (attempted,
 established, failed, timeout, resumed, established per second, mean and
 maximum setup time) and `serving_cpu_us_per_established_connection`; both are
 `null` in the request test. A phase lost on connections ends the run with the
-outcome `connections_broken`.
+outcome `connections_broken`. Over TLS each finished phase also has a `tls`
+object with the negotiated `version`, `cipher` and `group`, and the plan
+records the declared `tls_offer`; `--tls-version`, `--tls-group` and
+`--tls-cipher` are the same options as `brk`'s.
 
 Workers are gated before the start sample and drained before the finish sample.
 PID reads are sequential, not atomic; records include both sampling spans and
