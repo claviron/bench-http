@@ -9,7 +9,7 @@ serve the same plain and JSON workloads with mimalloc in one process by default.
 | --- | --- | --- |
 | `src/native/tokio.rs` | `tokio` | Tokio TCP tasks and a small HTTP/1 parser. |
 | `src/native/mio.rs` | `mio` | One Mio Poll loop and reuse-port listener per thread. |
-| `src/native/hyper.rs` | `hyper` | Native Hyper HTTP/1 service. |
+| `src/native/hyper.rs` | `hyper` | Native Hyper HTTP/1 service, over TLS when a certificate is supplied. |
 | `src/native/axum.rs` | `axum` | Native `axum::serve` and Axum router. |
 | `src/claviron/other.rs` | `claviron-other` | Registered terminal `OtherHandler`. |
 | `src/claviron/axum.rs` | `claviron-axum` | Registered dedicated Axum router, identical to native Axum. |
@@ -157,6 +157,58 @@ exported value. Mio's `--backlog` overrides its environment value. The OS may ca
 the queue: verify the effective backlog, especially when connections are opened
 in a burst. Backlog is not an active-request or keep-alive connection limit.
 Shutdown drains owned work without a benchmark-specific termination timeout.
+
+### TLS
+
+The same hosts serve HTTP/1.1 over TLS from one generated certificate store.
+Build the generator and write the store once; an existing directory is refused:
+
+```sh
+python3 scripts/build.py --native --target certs
+./target/release/certs --dir certs --name benchmark.test --days 30
+```
+
+The store has the layout of a Claviron certificate store, so Claviron loads it
+through its ordinary `tls.yaml` and a native host reads the same PEM files:
+
+```text
+certs/certstore.yaml
+certs/ca/bench/ca.crt
+certs/servers/benchmark.test/fullchain.pem
+certs/servers/benchmark.test/privkey.pem
+```
+
+Native Hyper serves TLS when both variables name those files; without them it
+serves cleartext as before. The handshake runs on each connection's own task.
+
+```sh
+export BENCH_TLS_CERT=certs/servers/benchmark.test/fullchain.pem
+export BENCH_TLS_KEY=certs/servers/benchmark.test/privkey.pem
+./target/release/hyper
+```
+
+Claviron reads `config/tls/`: the same listener with `tls: true`, the default
+host with `benchmark.test` as its alias, and a `tls.yaml` that names the store
+relative to the working directory. Registration is unchanged; only the config
+directory differs.
+
+```sh
+scripts/run.sh claviron-other --config-dir config/tls --name bench-tls --fleet bhtls
+```
+
+The client names the certificate's host in the URL, connects to the listener's
+address and trusts the store's authority. Certificate verification is always on:
+
+```sh
+./target/release/brk https://benchmark.test/plain \
+  --connect 127.0.0.1:8080 --cacert certs/ca/bench/ca.crt \
+  --conn 1024 --start 1 --pace 1 --phase 60s --timeout 100ms
+```
+
+`brk-observe` takes the same `--connect` and `--cacert`. Every connection
+completes its handshake during setup and is then reused, so these runs measure
+requests on established TLS connections. They do not measure handshake rate or
+session resumption. Compare TLS runs only with TLS runs.
 
 ## Measure
 

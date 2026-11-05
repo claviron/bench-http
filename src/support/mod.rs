@@ -8,5 +8,6 @@ pub mod listener;
 pub mod payload;
 pub mod response;
 pub mod runtime;
+pub mod tls;
 #[cfg(feature = "warp")]
 pub mod warp;

@@ -1,0 +1,5 @@
+default:
+  root: .
+  aliases: [benchmark.test]
+  access_log: "off"
+  transport: { protocols: [h1] }

@@ -10,13 +10,14 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ("tokio", "mio", "hyper", "axum")
+TOOLS = ("certs",)
 CLAVIRON = ("claviron-other", "claviron-axum", "claviron-warp", "claviron-routable")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--native", action="store_true", help="Optimize for this CPU")
-    parser.add_argument("--target", choices=("all", "native", "claviron", "brk", "brk-observe", *NATIVE, *CLAVIRON),
+    parser.add_argument("--target", choices=("all", "native", "claviron", "brk", "brk-observe", *TOOLS, *NATIVE, *CLAVIRON),
                         default="all", help="Select a group or one binary (default: all)")
     parser.add_argument("--supervisor", action="store_true",
                         help="Expose --workers on Claviron binaries")

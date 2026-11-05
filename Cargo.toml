@@ -17,7 +17,7 @@ client = ["dep:brk", "dep:humantime", "dep:libc"]
 [dependencies]
 # HTTP hosts
 axum = "0.8"
-claviron = { version = "0.2.0-alpha.24", path = "../../claviron", default-features = false, features = ["edge", "axum"], optional = true }
+claviron = { version = "0.2.0-alpha.24", path = "../../claviron", default-features = false, features = ["edge", "axum", "tls"], optional = true }
 hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["tokio", "server-graceful"] }
 httparse = "1"
@@ -25,8 +25,13 @@ mio = { version = "1", features = ["os-poll", "net"] }
 socket2 = { version = "0.6", features = ["all"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "io-util", "sync"] }
 
+# TLS for the native hosts and the certificate store the hosts read
+rcgen = "0.14"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false }
+
 # Command line
-brk = { package = "break", version = "0.1.0", path = "../break", default-features = false, features = ["cli"], optional = true }
+brk = { package = "break", version = "0.1.0", path = "../break", default-features = false, features = ["cli", "tls"], optional = true }
 humantime = { version = "2", optional = true }
 libc = { version = "0.2", optional = true }
 clap = { version = "4", features = ["derive"] }
@@ -53,6 +58,10 @@ required-features = ["client"]
 name = "brk-observe"
 path = "src/measure/main.rs"
 required-features = ["client"]
+
+[[bin]]
+name = "certs"
+path = "src/certs.rs"
 
 [[bin]]
 name = "tokio"

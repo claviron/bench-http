@@ -20,6 +20,12 @@ use super::outcome::classify;
 )]
 struct Args {
     url: String,
+    /// Connect to this address instead of resolving the URL's host.
+    #[arg(long, value_name = "ADDRESS")]
+    connect: Option<std::net::SocketAddr>,
+    /// For https://, trust the authorities in this PEM file.
+    #[arg(long, value_name = "FILE")]
+    cacert: Option<PathBuf>,
     /// Serving PID(s), repeated or comma-separated; exclude the supervisor.
     #[arg(long, value_delimiter = ',', required = true)]
     server_pid: Vec<u32>,
@@ -193,6 +199,14 @@ pub fn execute() -> io::Result<ExitCode> {
     };
     let acceptance = plan.validate().map_err(io::Error::other)?;
     let mut target = Target::new(&args.url).map_err(io::Error::other)?;
+    if let Some(address) = args.connect {
+        target = target.connect_to(address);
+    }
+    if let Some(path) = &args.cacert {
+        target = target
+            .trust_pem(&std::fs::read(path)?)
+            .map_err(io::Error::other)?;
+    }
     let probe = Probe::new(&args.server_pid, args.master_pid)?;
     let writer = BufWriter::new(
         OpenOptions::new()

@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 
-use bench_http::support::{listener, response, runtime};
+use bench_http::support::{listener, response, runtime, tls};
 use bytes::Bytes;
 use http::{Request, Response};
 use http_body_util::Full;
@@ -22,12 +22,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     runtime::logging();
     let address = std::env::var("BENCH_ADDRESS")?;
     let listener = listener::bind(&address).await?;
+    let acceptor = tls::acceptor_from_env()?;
     let mut http = http1::Builder::new();
     http.keep_alive(true).header_read_timeout(None).writev(true);
     let graceful = GracefulShutdown::new();
     let stop = runtime::shutdown_signal();
     tokio::pin!(stop);
-    tracing::info!(%address, "Hyper listening");
+    tracing::info!(%address, tls = acceptor.is_some(), "Hyper listening");
     loop {
         tokio::select! {
             biased;
@@ -35,10 +36,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             accepted = listener.accept() => {
                 let (stream, _) = accepted?;
                 stream.set_nodelay(true)?;
-                let connection = http.serve_connection(TokioIo::new(stream), service_fn(handle));
-                let connection = graceful.watch(connection);
+                let Some(acceptor) = acceptor.clone() else {
+                    let connection = http.serve_connection(TokioIo::new(stream), service_fn(handle));
+                    let connection = graceful.watch(connection);
+                    tokio::spawn(async move {
+                        if let Err(error) = connection.await {
+                            runtime::connection_error(&error);
+                        }
+                    });
+                    continue;
+                };
+                // The handshake runs on the connection's own task, never on
+                // the accept loop.
+                let http = http.clone();
+                let watcher = graceful.watcher();
                 tokio::spawn(async move {
-                    if let Err(error) = connection.await {
+                    let stream = match acceptor.accept(stream).await {
+                        Ok(stream) => stream,
+                        Err(error) => {
+                            tracing::debug!(%error, "TLS handshake failed");
+                            return;
+                        }
+                    };
+                    let connection = http.serve_connection(TokioIo::new(stream), service_fn(handle));
+                    if let Err(error) = watcher.watch(connection).await {
                         runtime::connection_error(&error);
                     }
                 });
