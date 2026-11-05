@@ -380,6 +380,12 @@ object with the negotiated `version`, `cipher` and `group`, and the plan
 records the declared `tls_offer`; `--tls-version`, `--tls-group` and
 `--tls-cipher` are the same options as `brk`'s.
 
+Schema 5 adds `cpus` to the `plan` record: for every measured process its
+`pid`, `role` and the allowed CPU list of its main thread, read before traffic,
+and `client_shares_serving_cpus`. The final record's `boundary.cpu_workers` is
+the number of client worker threads. See
+[Client and server on one machine](#client-and-server-on-one-machine).
+
 Workers are gated before the start sample and drained before the finish sample.
 PID reads are sequential, not atomic; records include both sampling spans and
 the CPU accounting window. CPU precision follows the OS clock ticks. Client CPU
@@ -401,7 +407,7 @@ Read the output as one JSON object per line:
 
 | `event` | Meaning |
 | --- | --- |
-| `plan` | URL, load/SLA parameters, expected body and process roles. |
+| `plan` | URL, load/SLA parameters, expected body, process roles and allowed CPUs. |
 | `phase_started` | The next load level, before worker release. |
 | `phase_finished` | Drained phase outcomes, acceptance and matching CPU samples. |
 | `result` | Final outcome, total counts, last accepted and last tested phase. |
@@ -427,6 +433,29 @@ backlog and descriptor limits identical. Declare each server's process/executor
 topology and use a fresh file for every run. Compare the last accepted and first
 rejected phase, then compare throughput and CPU at shared load levels. A client
 resource, protocol or measurement error is not evidence of a server SLA limit.
+
+#### Client and server on one machine
+
+A client that shares CPUs with the server it measures competes with it: the
+boundary found then belongs to both, and serving CPU per request includes the
+cost of being preempted by the client. Give each side its own CPUs and size the
+server's workers to its share. `brk` starts one worker thread per CPU it may
+run on, up to the connection count, so the CPU set also bounds its threads:
+
+```sh
+# Server workers on CPUs 0 to 31, the client on 32 to 39.
+taskset -c 0-31 scripts/run.sh claviron-other --workers 32
+taskset -c 32-39 ./target/release/brk-observe http://127.0.0.1:8080/plain \
+  --server-pid "$WORKER_PIDS" --master-pid "$MASTER_PID" --output phases.jsonl \
+  --conn 1024 --start 1 --pace 1 --phase 60s --timeout 100ms
+```
+
+Use the same split for every target of a comparison. The `plan` record states
+each process's allowed CPUs, and `brk-observe` warns when the client's overlap
+the serving processes'; `--check-only` shows this before any traffic. The list
+is the main thread's: a server that pins its threads itself is not described by
+it. Check that the client is not the limit by reading `cpu.client` against the
+window and the client's CPU count.
 
 ### Fixed load
 

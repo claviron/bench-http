@@ -351,6 +351,12 @@ pub fn execute() -> io::Result<ExitCode> {
         target = target.tls_cipher(cipher).map_err(io::Error::other)?;
     }
     let probe = Probe::new(&args.server_pid, args.master_pid)?;
+    let placement = probe.placement()?;
+    if placement.client_shares_serving_cpus {
+        eprintln!(
+            "The client may run on CPUs the serving processes also use; a boundary found this way belongs to both."
+        );
+    }
     let writer = BufWriter::new(
         OpenOptions::new()
             .write(true)
@@ -376,9 +382,10 @@ pub fn execute() -> io::Result<ExitCode> {
             "start": plan.start, "pace": plan.pace,
             "requests_per_connection": plan.requests, "max_connections": plan.max_owners}),
     };
-    measurements.record(&json!({"event": "plan", "schema_version": 4, "url": args.url,
+    measurements.record(&json!({"event": "plan", "schema_version": 5, "url": args.url,
         "request_latency_includes_connection_setup": false,
         "server_pids": args.server_pid, "master_pid": args.master_pid, "client_pid": std::process::id(),
+        "cpus": placement,
         "ramp": ramp, "phase_seconds": args.phase.as_secs_f64(),
         "timeout_seconds": args.timeout.as_secs_f64(), "accept_percent": args.accept,
         "http2": args.http2, "tls_resumption": !args.no_resume,

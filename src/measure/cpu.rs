@@ -144,6 +144,71 @@ pub struct Report {
     processes: Vec<ProcessCpu>,
 }
 
+/// The CPUs the scheduler may run a measured process on: the allowed list of
+/// its main thread. A thread that set its own affinity is not seen here.
+#[derive(Debug, Serialize)]
+pub struct Allowed {
+    pid: u32,
+    role: Role,
+    cpus: Box<str>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Placement {
+    processes: Vec<Allowed>,
+    /// The client may run on a CPU that a serving process may also run on.
+    pub client_shares_serving_cpus: bool,
+}
+
+impl Placement {
+    /// `statuses` holds each process's `/proc/<pid>/status` text.
+    fn read<'a>(
+        statuses: impl IntoIterator<Item = (Role, u32, &'a str)>,
+    ) -> io::Result<Self> {
+        let mut processes = Vec::new();
+        let mut serving = Vec::new();
+        let mut client = Vec::new();
+        for (role, pid, status) in statuses {
+            let cpus = status
+                .lines()
+                .find_map(|line| line.strip_prefix("Cpus_allowed_list:"))
+                .map(str::trim)
+                .ok_or_else(|| invalid("process status has no allowed CPU list"))?;
+            match role {
+                Role::Serving => serving.extend(ranges(cpus)?),
+                Role::Client => client.extend(ranges(cpus)?),
+                Role::Master => {}
+            }
+            processes.push(Allowed { pid, role, cpus: cpus.into() });
+        }
+        let client_shares_serving_cpus = client.iter().any(|ours| {
+            serving
+                .iter()
+                .any(|theirs| ours.0 <= theirs.1 && theirs.0 <= ours.1)
+        });
+        Ok(Self { processes, client_shares_serving_cpus })
+    }
+}
+
+/// Inclusive ranges of a kernel CPU list such as `0-31,40`.
+fn ranges(list: &str) -> io::Result<Vec<(u32, u32)>> {
+    let number = |text: &str| {
+        text.trim()
+            .parse::<u32>()
+            .map_err(|_| invalid("invalid allowed CPU list"))
+    };
+    list.split(',')
+        .map(|part| {
+            let (first, last) = part.split_once('-').unwrap_or((part, part));
+            let (first, last) = (number(first)?, number(last)?);
+            if first > last {
+                return Err(invalid("invalid allowed CPU list"));
+            }
+            Ok((first, last))
+        })
+        .collect()
+}
+
 pub struct Probe {
     identities: Vec<(Role, Reading)>,
     hz: u64,
@@ -179,6 +244,23 @@ impl Probe {
         }
         add(Role::Client, std::process::id())?;
         Ok(Self { identities, hz })
+    }
+
+    /// Where each measured process may run, read once before traffic.
+    pub fn placement(&self) -> io::Result<Placement> {
+        let statuses = self
+            .identities
+            .iter()
+            .map(|(role, identity)| {
+                let status = fs::read_to_string(format!("/proc/{}/status", identity.pid))?;
+                Ok((*role, identity.pid, status))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        Placement::read(
+            statuses
+                .iter()
+                .map(|(role, pid, status)| (*role, *pid, status.as_str())),
+        )
     }
 
     pub fn capture(&self) -> io::Result<Snapshot> {

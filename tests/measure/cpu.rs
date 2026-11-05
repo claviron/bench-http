@@ -57,3 +57,24 @@ fn worker_cpu_is_summed_once_with_master_and_client_separate() {
     assert!((report.client.total_seconds - 0.04).abs() < f64::EPSILON);
     assert_eq!(report.processes.len(), 4);
 }
+
+#[test]
+fn a_client_on_serving_cpus_is_declared_and_a_separate_one_is_not() {
+    let status = |cpus: &str| format!("Name:\tworker\nCpus_allowed:\tff\nCpus_allowed_list:\t{cpus}\n");
+    let placed = |serving: &str, client: &str| {
+        let (serving, master, client) = (status(serving), status("0-39"), status(client));
+        Placement::read([
+            (Role::Serving, 1, serving.as_str()),
+            (Role::Master, 2, master.as_str()),
+            (Role::Client, 3, client.as_str()),
+        ])
+        .unwrap()
+    };
+    // The supervisor's CPUs are recorded and do not decide the answer.
+    let apart = placed("0-31", "32-39");
+    assert!(!apart.client_shares_serving_cpus);
+    assert_eq!(&*apart.processes[2].cpus, "32-39");
+    assert!(placed("0-31,36", "32-39").client_shares_serving_cpus);
+    assert!(placed("0-39", "0-39").client_shares_serving_cpus);
+    assert!(Placement::read([(Role::Client, 3, "Name:\tworker\n")]).is_err());
+}
