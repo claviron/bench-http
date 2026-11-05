@@ -437,32 +437,27 @@ resource, protocol or measurement error is not evidence of a server SLA limit.
 
 #### Client and server on one machine
 
-A client that shares CPUs with the server it measures competes with it: the
-boundary found then belongs to both, and serving CPU per request includes the
-cost of being preempted by the client. Declare both sides so that the server's
-threads and the client's fit the machine's CPUs together. Every host and the
-client take their count; without it each would start one thread for every CPU:
-
-```sh
-# A 40-CPU machine: 32 serving threads and 8 client threads.
-./target/release/hyper --threads 32
-BENCH_HTTP_EXECUTION=current_thread scripts/run.sh claviron-other --workers 32
-./target/release/brk-observe http://127.0.0.1:8080/plain --threads 8 \
-  --server-pid "$WORKER_PIDS" --master-pid "$MASTER_PID" --output phases.jsonl \
-  --conn 1024 --start 1 --pace 1 --phase 60s --timeout 100ms
-```
+Without `--threads` the client starts one thread for every CPU, so that what
+gives way under load is the server and not the client. On the server's own
+machine the two share the CPUs. The boundary found then belongs to both: it
+compares servers measured under the same conditions and is not one server's
+capacity. Serving CPU per successful response is counted per process and is
+the figure least affected by the sharing.
 
 `--threads` is taken by the Tokio-based native hosts (`hyper`, `axum`,
-`tokio`), by `mio`, and by `brk` and `brk-observe`. A Claviron host is sized by
-`--workers` with `current_thread` execution. Use the same split for every
-target of a comparison and state it with the result.
+`tokio`), by `mio`, and by `brk` and `brk-observe`; a Claviron host is sized by
+`--workers`. A thread count is a number of threads. It reserves no CPU: client
+and server threads run wherever the kernel puts them, and over loopback part
+of each side's network work runs in the other's system calls. Splitting the
+machine by thread counts therefore separates nothing, and a client given few
+threads becomes the side that gives way. For a hard separation the client
+belongs on another machine.
 
-A thread count bounds how much CPU a side can take, not where it runs. For a
-hard separation give each process its own CPU set with `taskset`. The `plan`
-record states each process's allowed CPUs and whether the client's overlap the
-serving processes'; `--check-only` writes it before any traffic. The list is the main thread's: a server that pins its threads itself
-is not described by it. Check that the client is not the limit by reading
-`cpu.client` against the window and the client's thread count.
+The `plan` record states each process's allowed CPUs and whether the client's
+overlap the serving processes'; `--check-only` writes it before any traffic.
+The list is the main thread's: a server that pins its threads itself is not
+described by it. Read `cpu.client` beside `cpu.serving` in each phase to see
+how much of the machine the client took.
 
 #### Comparing clients
 
