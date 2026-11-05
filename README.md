@@ -286,6 +286,22 @@ Here `WORKER_PIDS` is a comma-separated list. After validation, run the same
 command without `--check-only`, using a different output filename, to apply
 load. `--check-only` does not exercise traffic, deadlines or acceptance.
 
+`brk-observe` names the two brk tests as `brk` does. Without a name it runs
+the request test, as above. The connection test raises concurrent connections,
+each carrying a fixed number of requests before it is replaced:
+
+```sh
+./target/release/brk-observe conn https://benchmark.test/plain \
+  --connect 127.0.0.1:8080 --cacert certs/ca/bench/ca.crt \
+  --server-pid "$WORKER_PIDS" --master-pid "$MASTER_PID" \
+  --output connections.jsonl \
+  --start 64 --pace 64 --requests 1 --phase 60s --timeout 100ms
+```
+
+Add `--no-resume` to make every TLS handshake a full one. With resumption
+(the default) each connection owner is one returning visitor; the share of
+resumed handshakes shows whether the server's session cache served it.
+
 Each `phase_finished` record contains the phase's attempted/successful/error
 counts, acceptance decision, successful requests/s, and serving, master, total
 runtime and client CPU seconds. Serving CPU sums workers' own user+system time;
@@ -315,6 +331,18 @@ handler execution. Fully decoded late or invalid replies contribute; incomplete
 timeouts and abandoned attempts do not contribute zero-duration samples. Always
 read the sample count and error counts with the mean. Connection setup remains
 separate under `load`; the existing SLA/deadline behavior is unchanged.
+
+Schema 4 names the test. The `plan` record carries a `ramp` object: for the
+request test `test: "requests"`, `conn`, `start`, `pace` and
+`max_requests_per_connection`; for the connection test `test: "connections"`,
+`start`, `pace`, `requests_per_connection` and `max_connections`, where the
+levels count concurrent connections. These fields were top-level before
+schema 4. `tls_resumption` states whether sessions were resumed. In the
+connection test each finished phase has a `setups` object (attempted,
+established, failed, timeout, resumed, established per second, mean and
+maximum setup time) and `serving_cpu_us_per_established_connection`; both are
+`null` in the request test. A phase lost on connections ends the run with the
+outcome `connections_broken`.
 
 Workers are gated before the start sample and drained before the finish sample.
 PID reads are sequential, not atomic; records include both sampling spans and

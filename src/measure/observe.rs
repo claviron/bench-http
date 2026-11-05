@@ -4,10 +4,13 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use std::ffi::OsString;
+
 use brk::{
-    Acceptance, CancellationToken, Counts, Observer, Phase, PhaseStats, Plan, Stats, Target,
+    Acceptance, CancellationToken, ConnectionPlan, Counts, Observer, Phase, PhaseStats, Plan,
+    Stats, Target,
 };
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 
 use super::cpu::{Probe, Snapshot};
@@ -18,7 +21,24 @@ use super::outcome::classify;
     name = "brk-observe",
     about = "Record brk SLA outcomes and Linux process CPU at phase boundaries"
 )]
-struct Args {
+struct Cli {
+    #[command(subcommand)]
+    test: Test,
+}
+
+/// The two brk tests, named as `brk` names them. The request test is the default.
+#[derive(Subcommand)]
+enum Test {
+    /// Raise concurrent requests per connection over connections that stay open.
+    #[command(alias = "req")]
+    Requests(RequestArgs),
+    /// Raise concurrent connections, each carrying a fixed number of requests.
+    #[command(alias = "conn")]
+    Connections(ConnectionArgs),
+}
+
+#[derive(clap::Args)]
+struct Common {
     url: String,
     /// Connect to this address instead of resolving the URL's host.
     #[arg(long, value_name = "ADDRESS")]
@@ -26,6 +46,9 @@ struct Args {
     /// For https://, trust the authorities in this PEM file.
     #[arg(long, value_name = "FILE")]
     cacert: Option<PathBuf>,
+    /// For https://, make every handshake a full one instead of resuming.
+    #[arg(long)]
+    no_resume: bool,
     /// Serving PID(s), repeated or comma-separated; exclude the supervisor.
     #[arg(long, value_delimiter = ',', required = true)]
     server_pid: Vec<u32>,
@@ -35,26 +58,72 @@ struct Args {
     /// New JSONL output file; existing files are never overwritten.
     #[arg(long)]
     output: PathBuf,
-    #[arg(long)]
-    conn: usize,
-    #[arg(long)]
-    start: Option<usize>,
-    #[arg(long)]
-    pace: usize,
     #[arg(long, value_parser = humantime::parse_duration)]
     phase: Duration,
     #[arg(long, value_parser = humantime::parse_duration)]
     timeout: Duration,
     #[arg(long, default_value_t = 99.99)]
     accept: f64,
-    /// Optional ceiling in requests per connection, not total requests.
-    #[arg(long = "max")]
-    max_concurrency: Option<usize>,
     #[arg(long)]
     expect_body: Option<String>,
     /// Validate the plan and process counters without resolving or contacting the target.
     #[arg(long)]
     check_only: bool,
+}
+
+#[derive(clap::Args)]
+struct RequestArgs {
+    #[command(flatten)]
+    common: Common,
+    #[arg(long)]
+    conn: usize,
+    #[arg(long)]
+    start: Option<usize>,
+    #[arg(long)]
+    pace: usize,
+    /// Optional ceiling in requests per connection, not total requests.
+    #[arg(long = "max")]
+    max_concurrency: Option<usize>,
+}
+
+#[derive(clap::Args)]
+struct ConnectionArgs {
+    #[command(flatten)]
+    common: Common,
+    /// Initial concurrent connections; defaults to pace.
+    #[arg(long)]
+    start: Option<usize>,
+    /// Additional concurrent connections in each phase.
+    #[arg(long)]
+    pace: usize,
+    /// Exact number of requests each connection carries.
+    #[arg(long)]
+    requests: usize,
+    /// Optional ceiling in concurrent connections.
+    #[arg(long = "max")]
+    max_owners: Option<usize>,
+}
+
+/// `brk-observe <url> ...` is the request test, as `brk <url> ...` is.
+fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Cli, clap::Error> {
+    let mut arguments: Vec<OsString> = arguments.into_iter().collect();
+    let named = arguments.get(1).and_then(|first| first.to_str()).is_some_and(|first| {
+        matches!(
+            first,
+            "requests" | "req" | "connections" | "conn" | "help" | "-h" | "--help"
+        )
+    });
+    if !named && arguments.len() > 1 {
+        arguments.insert(1, "requests".into());
+    }
+    Cli::try_parse_from(arguments)
+}
+
+/// The selected test's validated plan.
+#[derive(Clone, Copy)]
+enum Selected {
+    Requests(Plan),
+    Connections(ConnectionPlan),
 }
 
 fn counts(counts: Counts) -> Value {
@@ -129,12 +198,27 @@ impl Measurements {
                 "max_send_delay_seconds": stats.load.max_send_delay.as_secs_f64(),
                 "max_deadline_lateness_seconds": stats.load.max_deadline_lateness.as_secs_f64()
             },
+            "setups": stats.setups.map(|setups| json!({
+                "attempted": setups.attempted, "established": setups.established,
+                "failed": setups.failed, "timeout": setups.timeout, "resumed": setups.resumed,
+                "established_per_second": stats.connections_per_sec(),
+                "setup_mean_ms": setups.mean_millis(),
+                "setup_max_seconds": setups.longest.as_secs_f64()
+            })),
+            "serving_cpu_us_per_established_connection": stats.setups
+                .and_then(|setups| per_request(cpu.serving.total_seconds, setups.established)),
             "serving_cpu_us_per_attempt": per_request(cpu.serving.total_seconds, stats.counts.attempted),
             "serving_cpu_us_per_success": per_request(cpu.serving.total_seconds, stats.counts.successful),
             "total_runtime_cpu_us_per_success": per_request(cpu.total_runtime.total_seconds, stats.counts.successful),
             "client_cpu_us_per_success": per_request(cpu.client.total_seconds, stats.counts.successful),
             "cpu": cpu});
         self.record(&measured)?;
+        if let Some(setups) = &stats.setups {
+            println!(
+                "Connections: established={} of {} attempts, failed={}, timeout={}, resumed={}",
+                setups.established, setups.attempted, setups.failed, setups.timeout, setups.resumed
+            );
+        }
         match stats.latency.mean_millis() {
             Some(mean) => println!(
                 "Request average: {mean:.3} ms over {} complete responses (TCP setup excluded)",
@@ -187,17 +271,38 @@ fn boundary(stats: &Stats) -> Value {
 }
 
 pub fn execute() -> io::Result<ExitCode> {
-    let args = Args::parse();
-    let plan = Plan {
-        conn: args.conn,
-        start: args.start.unwrap_or(args.pace),
-        pace: args.pace,
-        phase_duration: args.phase,
-        timeout: args.timeout,
-        accept: args.accept,
-        max_concurrency: args.max_concurrency,
+    let cli = parse(std::env::args_os()).unwrap_or_else(|error| error.exit());
+    let (args, selected) = match cli.test {
+        Test::Requests(test) => {
+            let plan = Plan {
+                conn: test.conn,
+                start: test.start.unwrap_or(test.pace),
+                pace: test.pace,
+                phase_duration: test.common.phase,
+                timeout: test.common.timeout,
+                accept: test.common.accept,
+                max_concurrency: test.max_concurrency,
+            };
+            (test.common, Selected::Requests(plan))
+        }
+        Test::Connections(test) => {
+            let plan = ConnectionPlan {
+                start: test.start.unwrap_or(test.pace),
+                pace: test.pace,
+                requests: test.requests,
+                phase_duration: test.common.phase,
+                timeout: test.common.timeout,
+                accept: test.common.accept,
+                max_owners: test.max_owners,
+            };
+            (test.common, Selected::Connections(plan))
+        }
     };
-    let acceptance = plan.validate().map_err(io::Error::other)?;
+    let acceptance = match selected {
+        Selected::Requests(plan) => plan.validate(),
+        Selected::Connections(plan) => plan.validate(),
+    }
+    .map_err(io::Error::other)?;
     let mut target = Target::new(&args.url).map_err(io::Error::other)?;
     if let Some(address) = args.connect {
         target = target.connect_to(address);
@@ -206,6 +311,9 @@ pub fn execute() -> io::Result<ExitCode> {
         target = target
             .trust_pem(&std::fs::read(path)?)
             .map_err(io::Error::other)?;
+    }
+    if args.no_resume {
+        target = target.without_resumption();
     }
     let probe = Probe::new(&args.server_pid, args.master_pid)?;
     let writer = BufWriter::new(
@@ -223,12 +331,22 @@ pub fn execute() -> io::Result<ExitCode> {
         acceptance,
         error: None,
     };
-    measurements.record(&json!({"event": "plan", "schema_version": 3, "url": args.url,
+    // What each test raises. In the connection test `start`, `pace` and the
+    // ceiling count concurrent connections.
+    let ramp = match selected {
+        Selected::Requests(plan) => json!({"test": "requests", "conn": plan.conn,
+            "start": plan.start, "pace": plan.pace,
+            "max_requests_per_connection": plan.max_concurrency}),
+        Selected::Connections(plan) => json!({"test": "connections",
+            "start": plan.start, "pace": plan.pace,
+            "requests_per_connection": plan.requests, "max_connections": plan.max_owners}),
+    };
+    measurements.record(&json!({"event": "plan", "schema_version": 4, "url": args.url,
         "request_latency_includes_connection_setup": false,
         "server_pids": args.server_pid, "master_pid": args.master_pid, "client_pid": std::process::id(),
-        "conn": plan.conn, "start": plan.start, "pace": plan.pace, "phase_seconds": plan.phase_duration.as_secs_f64(),
-        "timeout_seconds": plan.timeout.as_secs_f64(), "accept_percent": plan.accept,
-        "max_requests_per_connection": plan.max_concurrency, "expect_body": args.expect_body,
+        "ramp": ramp, "phase_seconds": args.phase.as_secs_f64(),
+        "timeout_seconds": args.timeout.as_secs_f64(), "accept_percent": args.accept,
+        "tls_resumption": !args.no_resume, "expect_body": args.expect_body,
         "check_only": args.check_only}))?;
     if let Some(body) = args.expect_body {
         target = target.expect_body(body.into_bytes());
@@ -244,7 +362,12 @@ pub fn execute() -> io::Result<ExitCode> {
     }
     let signal = stop.clone();
     ctrlc::set_handler(move || signal.cancel()).map_err(io::Error::other)?;
-    let result = brk::run(&target, plan, &stop, &mut measurements);
+    let result = match selected {
+        Selected::Requests(plan) => brk::run(&target, plan, &stop, &mut measurements),
+        Selected::Connections(plan) => {
+            brk::run_connections(&target, plan, &stop, &mut measurements)
+        }
+    };
     let stats = match &result {
         Ok(done) => &done.stats,
         Err(broken) => &broken.stats,
@@ -267,3 +390,7 @@ pub fn execute() -> io::Result<ExitCode> {
     println!("Result: {label}");
     Ok(ExitCode::from(code))
 }
+
+#[cfg(test)]
+#[path = "../../tests/measure/observe.rs"]
+mod tests;
