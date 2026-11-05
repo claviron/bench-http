@@ -464,6 +464,26 @@ serving processes'; `--check-only` writes it before any traffic. The list is the
 is not described by it. Check that the client is not the limit by reading
 `cpu.client` against the window and the client's thread count.
 
+#### Comparing clients
+
+`scripts/compare-clients.py` answers a different question from the ramps: what
+a client costs. It runs each case with every named client in turn against a
+server that is already running, for several rounds, and prints the median
+units per second, client CPU per unit and context switches per unit. It takes
+minutes, judges no SLA and says nothing about the server's capacity. Use it
+when the client changes, before spending a ramp on it.
+
+```sh
+BENCH_ADDRESS=127.0.0.1:8080 ./target/release/hyper --threads 16 &
+scripts/compare-clients.py --plain 127.0.0.1:8080 \
+  --threads 4 --seconds 10 --rounds 3 \
+  before=./brk-before after=./target/release/brk wrk="$(command -v wrk)"
+```
+
+With `--tls` and `--cacert` it adds the TLS cases, against a second native
+Hyper started with the certificate variables. A client named `wrk` runs only
+the plain cases without pipelining.
+
 ### Fixed load
 
 Preflight the expected status, content type and body before applying load:
