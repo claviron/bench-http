@@ -2,8 +2,11 @@ use brk::{BreakReason, Broken};
 
 pub(super) fn classify(broken: &Broken) -> (&'static str, u8) {
     match &broken.reason {
-        BreakReason::Acceptance if !broken.has_capacity_boundary() => ("initial_load_rejected", 1),
+        BreakReason::Acceptance | BreakReason::Connections if !broken.has_capacity_boundary() => {
+            ("initial_load_rejected", 1)
+        }
         BreakReason::Acceptance => ("sla_broken", 1),
+        BreakReason::Connections => ("connections_broken", 1),
         BreakReason::Cancelled => ("cancelled", 130),
         BreakReason::Unfulfilled => ("load_unfulfilled", 2),
         BreakReason::Protocol(_) => ("protocol_error", 2),

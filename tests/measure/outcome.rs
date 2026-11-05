@@ -22,6 +22,7 @@ fn measured() -> PhaseStats {
         connections_at_target: 1,
         load: LoadStats::default(),
         latency: LatencyStats::default(),
+        setups: None,
         completed: true,
         cancelled: false,
     }
