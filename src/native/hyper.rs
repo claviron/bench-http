@@ -1,7 +1,9 @@
 use std::convert::Infallible;
+use std::num::NonZeroUsize;
 
 use bench_http::support::{listener, response, runtime, tls};
 use bytes::Bytes;
+use clap::Parser;
 use http::{Request, Response};
 use http_body_util::Full;
 use hyper::body::Incoming;
@@ -34,8 +36,12 @@ where
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let host = runtime::Host::parse();
+    host.runtime()?.block_on(listen(host.threads))
+}
+
+async fn listen(threads: NonZeroUsize) -> Result<(), Box<dyn std::error::Error>> {
     runtime::logging();
     let address = std::env::var("BENCH_ADDRESS")?;
     let listener = listener::bind(&address).await?;
@@ -46,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let graceful = GracefulShutdown::new();
     let stop = runtime::shutdown_signal();
     tokio::pin!(stop);
-    tracing::info!(%address, tls = acceptor.is_some(), http2, "Hyper listening");
+    tracing::info!(%address, threads, tls = acceptor.is_some(), http2, "Hyper listening");
     loop {
         tokio::select! {
             biased;

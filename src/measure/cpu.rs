@@ -157,7 +157,7 @@ pub struct Allowed {
 pub struct Placement {
     processes: Vec<Allowed>,
     /// The client may run on a CPU that a serving process may also run on.
-    pub client_shares_serving_cpus: bool,
+    client_shares_serving_cpus: bool,
 }
 
 impl Placement {

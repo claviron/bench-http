@@ -1,7 +1,9 @@
 use std::io::{self, IoSlice, Write as _};
+use std::num::NonZeroUsize;
 
 use bench_http::support::{http1::parse_head, payload::{Answer, Endpoint, PLAIN}, runtime};
 use bytes::{Buf, BytesMut};
+use clap::Parser;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::watch;
@@ -120,8 +122,12 @@ fn completed(result: Result<io::Result<()>, tokio::task::JoinError>) {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let host = runtime::Host::parse();
+    host.runtime()?.block_on(listen(host.threads))
+}
+
+async fn listen(threads: NonZeroUsize) -> Result<(), Box<dyn std::error::Error>> {
     runtime::logging();
 
     let listener = bench_http::support::listener::bind(std::env::var("BENCH_ADDRESS")?).await?;
@@ -129,7 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut connections = JoinSet::new();
     let shutdown = runtime::shutdown_signal();
     tokio::pin!(shutdown);
-    tracing::info!("Listening on address {}", listener.local_addr()?);
+    tracing::info!(threads, "Listening on address {}", listener.local_addr()?);
 
     loop {
         tokio::select! {

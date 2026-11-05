@@ -70,6 +70,10 @@ struct Common {
     /// New JSONL output file; existing files are never overwritten.
     #[arg(long)]
     output: PathBuf,
+    /// Client worker threads; by default one for every CPU the process may
+    /// run on, never more than there are connections.
+    #[arg(long, value_name = "COUNT")]
+    threads: Option<usize>,
     #[arg(long, value_parser = humantime::parse_duration)]
     phase: Duration,
     #[arg(long, value_parser = humantime::parse_duration)]
@@ -305,6 +309,7 @@ pub fn execute() -> io::Result<ExitCode> {
                 timeout: test.common.timeout,
                 accept: test.common.accept,
                 max_concurrency: test.max_concurrency,
+                threads: test.common.threads,
             };
             (test.common, Selected::Requests(plan))
         }
@@ -317,6 +322,7 @@ pub fn execute() -> io::Result<ExitCode> {
                 timeout: test.common.timeout,
                 accept: test.common.accept,
                 max_owners: test.max_owners,
+                threads: test.common.threads,
             };
             (test.common, Selected::Connections(plan))
         }
@@ -352,11 +358,6 @@ pub fn execute() -> io::Result<ExitCode> {
     }
     let probe = Probe::new(&args.server_pid, args.master_pid)?;
     let placement = probe.placement()?;
-    if placement.client_shares_serving_cpus {
-        eprintln!(
-            "The client may run on CPUs the serving processes also use; a boundary found this way belongs to both."
-        );
-    }
     let writer = BufWriter::new(
         OpenOptions::new()
             .write(true)
@@ -385,7 +386,7 @@ pub fn execute() -> io::Result<ExitCode> {
     measurements.record(&json!({"event": "plan", "schema_version": 5, "url": args.url,
         "request_latency_includes_connection_setup": false,
         "server_pids": args.server_pid, "master_pid": args.master_pid, "client_pid": std::process::id(),
-        "cpus": placement,
+        "client_threads": args.threads, "cpus": placement,
         "ramp": ramp, "phase_seconds": args.phase.as_secs_f64(),
         "timeout_seconds": args.timeout.as_secs_f64(), "accept_percent": args.accept,
         "http2": args.http2, "tls_resumption": !args.no_resume,
