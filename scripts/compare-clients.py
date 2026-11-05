@@ -4,7 +4,9 @@
 Each case is run by every client in turn, for several rounds, and the median
 is reported: completed units per second, client CPU per unit (user, system),
 context switches per unit and failed requests. A unit is a request, or an
-established connection in the connection test.
+established connection in the connection test. A run that ended before its
+window, as a client does when a connection cannot be set up, is left out of
+the medians and counted under `early`.
 
 The server is the caller's: start it, pass its address, stop it afterwards.
 This measures clients. It says nothing about the server's capacity.
@@ -22,6 +24,7 @@ import resource
 import statistics
 import subprocess
 import sys
+import time
 
 
 def arguments():
@@ -115,7 +118,9 @@ def run(name, binary, command, unit, options):
         if command is None:
             return None, None
     before = resource.getrusage(resource.RUSAGE_CHILDREN)
+    began = time.monotonic()
     done = subprocess.run([binary, *command], capture_output=True, text=True)
+    elapsed = time.monotonic() - began
     after = resource.getrusage(resource.RUSAGE_CHILDREN)
     text = done.stdout + done.stderr
     if name == "wrk":
@@ -126,6 +131,9 @@ def run(name, binary, command, unit, options):
         failed = sum(int(n) for n in re.findall(r"\berrors=(\d+)", text))
     if count == 0:
         return None, text[-400:]
+    if elapsed < options.seconds:
+        # The client gave up before its window was over.
+        return "early", None
     user = (after.ru_utime - before.ru_utime) / count * 1e6
     system = (after.ru_stime - before.ru_stime) / count * 1e6
     switches = (after.ru_nvcsw - before.ru_nvcsw
@@ -141,24 +149,31 @@ def main():
     wanted = 65536 if hard == resource.RLIM_INFINITY else min(65536, hard)
     resource.setrlimit(resource.RLIMIT_NOFILE, (wanted, hard))
     print(f"{'case':26}{'client':10}{'per s':>10}{'user us':>9}"
-          f"{'sys us':>8}{'total':>8}{'switch':>8}{'failed':>8}")
+          f"{'sys us':>8}{'total':>8}{'switch':>8}{'failed':>8}{'early':>7}")
     for label, command, unit in cases(options):
         samples = {name: [] for name, _ in clients}
+        early = {name: 0 for name, _ in clients}
         for _ in range(options.rounds):
             for name, binary in clients:
                 result, problem = run(name, binary, command, unit, options)
-                if result is not None:
+                if result == "early":
+                    early[name] += 1
+                elif result is not None:
                     samples[name].append(result)
                 elif problem is not None:
                     print(f"{label:26}{name:10} no result: {problem!r}")
         for name, _ in clients:
             if not samples[name]:
+                if early[name]:
+                    print(f"{label:26}{name:10} every run ended early"
+                          f" ({early[name]})")
                 continue
             rate, user, system, switches, _ = (
                 statistics.median(column) for column in zip(*samples[name]))
             failed = sum(sample[4] for sample in samples[name])
             print(f"{label:26}{name:10}{rate:10.0f}{user:9.2f}{system:8.2f}"
-                  f"{user + system:8.2f}{switches:8.3f}{failed:8.0f}")
+                  f"{user + system:8.2f}{switches:8.3f}{failed:8.0f}"
+                  f"{early[name]:7d}")
         sys.stdout.flush()
 
 
